@@ -93,7 +93,12 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
-            if event.id == pause_resume_id || event.id == reload_snippets_id {
+            if event.id == pause_resume_id {
+                let _ = crate::engine::toggle_paused();
+                return;
+            }
+
+            if event.id == reload_snippets_id {
                 return;
             }
 
@@ -137,6 +142,8 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let engine_handle = crate::engine::start_runtime();
+            app.manage(engine_handle);
             build_tray(app.handle())?;
             Ok(())
         })
