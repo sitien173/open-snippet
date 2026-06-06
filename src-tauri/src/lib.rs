@@ -171,10 +171,13 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     crate::crash::install_panic_hook();
-    let log_handles = crate::log_init::init(&crate::store::LoggingConfig::default());
+    let logging_config = crate::store::LoggingConfig::default();
+    let log_handles = crate::log_init::init(&logging_config);
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            crate::commands::logging::get_logging_frontend_cfg,
+            crate::commands::logging::get_log_ring,
             crate::commands::snippets::list_snippets,
             crate::commands::snippets::save_snippet,
             crate::commands::snippets::reload_snippets,
@@ -228,6 +231,7 @@ pub fn run() {
             let sync_driver = crate::sync::spawn_driver(sync_state.backend(), sync_rx);
             app.manage(snippet_state);
             app.manage(prefs_state);
+            app.manage(logging_config);
             app.manage(log_handles);
             app.manage(form_runner);
             app.manage(sync_state);

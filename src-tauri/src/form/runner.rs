@@ -6,6 +6,7 @@ use std::{
 use tokio::sync::oneshot;
 
 use super::{FocusBackend, FocusError, ForegroundWindow};
+use crate::log_init::redact::{redact_str, FieldKind};
 use crate::store::Snippet;
 use tauri::{AppHandle, Runtime, WebviewUrl, WebviewWindowBuilder};
 
@@ -59,7 +60,9 @@ impl<R: Runtime> WindowSink for AppWindowSink<R> {
         if let Some((x, y)) = x.zip(y) {
             builder = builder.position(x as f64, y as f64);
         }
-        builder.build().map_err(|error| FormError::Window(error.to_string()))?;
+        builder
+            .build()
+            .map_err(|error| FormError::Window(error.to_string()))?;
         Ok(())
     }
 }
@@ -104,15 +107,18 @@ impl FormRunner {
         }
     }
 
+    #[tracing::instrument(skip(self, snippet), fields(snippet_id = %snippet.id, hwnd = hwnd.0))]
     pub async fn run(
         &self,
         snippet: &Snippet,
         hwnd: ForegroundWindow,
     ) -> Result<FormOutcome, FormError> {
+        tracing::info!(snippet_id = %snippet.id, hwnd = hwnd.0, "opening form");
         let (tx, rx) = oneshot::channel();
         {
             let mut in_flight = self.in_flight.lock().unwrap();
             if in_flight.is_some() {
+                tracing::warn!(snippet_id = %snippet.id, "form already open");
                 return Err(FormError::AlreadyOpen);
             }
             self.sink.open_form(&snippet.id, hwnd)?;
@@ -120,10 +126,7 @@ impl FormRunner {
                 hwnd,
                 snippet_id: Arc::<str>::from(snippet.id.clone()),
             };
-            *in_flight = Some(InFlight {
-                state,
-                tx,
-            });
+            *in_flight = Some(InFlight { state, tx });
         }
 
         let result = rx.await.map(|state| match state {
@@ -132,10 +135,25 @@ impl FormRunner {
             FormState::Pending { .. } => FormOutcome::Cancelled,
         });
         self.in_flight.lock().unwrap().take();
+        if let Ok(outcome) = &result {
+            tracing::info!(outcome = form_outcome_label(outcome), "form completed");
+        }
         result.map_err(|_| FormError::ChannelClosed)
     }
 
+    #[tracing::instrument(skip(self, values), fields(snippet_id = %snippet_id, value_count = values.len()))]
     pub fn submit(&self, snippet_id: &str, values: BTreeMap<String, String>) {
+        // SECURITY: form values are user content and may contain secrets.
+        let redacted_values = values
+            .iter()
+            .map(|(key, value)| (key.as_str(), redact_str(value, FieldKind::FormValue)))
+            .collect::<BTreeMap<_, _>>();
+        tracing::debug!(
+            snippet_id,
+            value_count = values.len(),
+            values = ?redacted_values,
+            "submitting form"
+        );
         if let Some(in_flight) = self.in_flight.lock().unwrap().take() {
             if in_flight.snippet_id() == snippet_id {
                 let _ = in_flight.tx.send(FormState::Submitted { values });
@@ -145,7 +163,9 @@ impl FormRunner {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(snippet_id = %snippet_id))]
     pub fn cancel(&self, snippet_id: &str) {
+        tracing::debug!(snippet_id, "cancelling form");
         if let Some(in_flight) = self.in_flight.lock().unwrap().take() {
             if in_flight.snippet_id() == snippet_id {
                 let _ = in_flight.tx.send(FormState::Cancelled);
@@ -161,9 +181,21 @@ pub fn restore_on_submit(
     hwnd: ForegroundWindow,
     outcome: &FormOutcome,
 ) -> Result<(), FocusError> {
+    tracing::debug!(
+        hwnd = hwnd.0,
+        outcome = form_outcome_label(outcome),
+        "restoring foreground after form"
+    );
     match outcome {
         FormOutcome::Submitted(_) => focus.restore_foreground(hwnd),
         FormOutcome::Cancelled => Ok(()),
+    }
+}
+
+fn form_outcome_label(outcome: &FormOutcome) -> &'static str {
+    match outcome {
+        FormOutcome::Submitted(_) => "submitted",
+        FormOutcome::Cancelled => "cancelled",
     }
 }
 
@@ -172,7 +204,7 @@ fn monitor_center(hwnd: ForegroundWindow, width: i32, height: i32) -> (Option<i3
     use windows::Win32::{
         Foundation::{HWND, RECT},
         Graphics::Gdi::{
-            GetMonitorInfoW, MonitorFromWindow, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+            GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
         },
     };
 
@@ -206,6 +238,10 @@ fn monitor_center(hwnd: ForegroundWindow, width: i32, height: i32) -> (Option<i3
 }
 
 #[cfg(not(windows))]
-fn monitor_center(_hwnd: ForegroundWindow, _width: i32, _height: i32) -> (Option<i32>, Option<i32>) {
+fn monitor_center(
+    _hwnd: ForegroundWindow,
+    _width: i32,
+    _height: i32,
+) -> (Option<i32>, Option<i32>) {
     (None, None)
 }

@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 use serde::Serialize;
 use tempfile::TempDir;
@@ -63,33 +60,48 @@ pub struct SyncStatusDto {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state, auth, pat), fields(remote = %remote, auth_mode = auth_mode_label(&auth), has_pat = pat.is_some()))]
 pub fn sync_test_connection(
     state: tauri::State<'_, SyncCommandState>,
     remote: String,
     auth: AuthMode,
     pat: Option<String>,
 ) -> Result<(), String> {
+    tracing::info!("testing sync connection");
     sync_test_connection_inner(state.inner(), remote, auth, pat)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state, auth, pat), fields(remote = %remote, auth_mode = auth_mode_label(&auth), has_pat = pat.is_some()))]
 pub fn sync_init(
     state: tauri::State<'_, SyncCommandState>,
     remote: String,
     auth: AuthMode,
     pat: Option<String>,
 ) -> Result<(), String> {
+    tracing::info!("initializing sync");
     sync_init_inner(state.inner(), remote, auth, pat)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn sync_tick_now(state: tauri::State<'_, SyncCommandState>) -> Result<TickReportDto, String> {
-    sync_tick_now_inner(state.inner()).map(Into::into)
+    let report = sync_tick_now_inner(state.inner())?;
+    tracing::info!(kind = tick_report_kind(&report), "sync tick completed");
+    Ok(report.into())
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn sync_status(state: tauri::State<'_, SyncCommandState>) -> Result<SyncStatusDto, String> {
-    sync_status_inner(state.inner()).map(Into::into)
+    let status = sync_status_inner(state.inner())?;
+    tracing::debug!(
+        branch = status.branch.as_deref().unwrap_or_default(),
+        ahead = status.ahead,
+        behind = status.behind,
+        "read sync status"
+    );
+    Ok(status.into())
 }
 
 pub fn sync_root() -> Result<PathBuf, String> {
@@ -120,7 +132,9 @@ pub fn sync_test_connection_inner(
         .connect_auth(git2::Direction::Fetch, Some(callbacks), None)
         .map_err(|error| error.to_string())?;
     let _ = remote_handle.list().map_err(|error| error.to_string())?;
-    remote_handle.disconnect().map_err(|error| error.to_string())?;
+    remote_handle
+        .disconnect()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -152,6 +166,8 @@ fn maybe_store_pat(
     pat: Option<String>,
 ) -> Result<(), String> {
     if let (AuthMode::HttpsPat { host, username }, Some(pat)) = (auth, pat) {
+        // SECURITY: never log the PAT itself; only log destination metadata.
+        tracing::debug!(host = %host, username = %username, "storing sync credential");
         store.write(
             &credential_key(host),
             &crate::sync::SyncCredential {
@@ -161,6 +177,21 @@ fn maybe_store_pat(
         )?;
     }
     Ok(())
+}
+
+fn auth_mode_label(auth: &AuthMode) -> &'static str {
+    match auth {
+        AuthMode::HttpsPat { .. } => "https_pat",
+        AuthMode::Ssh => "ssh",
+    }
+}
+
+fn tick_report_kind(report: &TickReport) -> &'static str {
+    match report {
+        TickReport::NoChanges => "no_changes",
+        TickReport::Synced { .. } => "synced",
+        TickReport::Conflict { .. } => "conflict",
+    }
 }
 
 impl From<TickReport> for TickReportDto {

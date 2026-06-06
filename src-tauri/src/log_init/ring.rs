@@ -124,13 +124,7 @@ impl JsonFieldVisitor {
 
 impl field::Visit for JsonFieldVisitor {
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
-        let rendered = format!("{value:?}");
-        let value = rendered
-            .strip_prefix('"')
-            .and_then(|value| value.strip_suffix('"'))
-            .map(str::to_string)
-            .unwrap_or(rendered);
-        self.record_value(field, Value::String(value));
+        self.record_value(field, Value::String(format!("{value:?}")));
     }
 
     fn record_i64(&mut self, field: &field::Field, value: i64) {

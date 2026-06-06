@@ -37,6 +37,7 @@ fn seed_remote() -> (TempDir, String) {
 }
 
 #[test]
+#[tracing_test::traced_test]
 fn client_b_sees_client_a_change_after_ticks() {
     let (_root, remote) = seed_remote();
     let client_a = TempDir::new().unwrap();

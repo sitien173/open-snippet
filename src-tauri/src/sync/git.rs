@@ -4,7 +4,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use git2::{build::RepoBuilder, BranchType, FetchOptions, IndexAddOption, PushOptions, Repository, Signature, StatusOptions};
+use git2::{
+    build::RepoBuilder, BranchType, FetchOptions, IndexAddOption, PushOptions, Repository,
+    Signature, StatusOptions,
+};
 
 use super::{
     conflicts::write_conflicts, git_remote_callbacks, AuthMode, CredentialStore, NoopNotifySink,
@@ -26,10 +29,7 @@ pub struct GitBackend {
 }
 
 impl GitBackend {
-    pub fn new(
-        credentials: Arc<dyn CredentialStore>,
-        notify: Arc<dyn NotifySink>,
-    ) -> Self {
+    pub fn new(credentials: Arc<dyn CredentialStore>, notify: Arc<dyn NotifySink>) -> Self {
         Self {
             state: Mutex::new(GitState::default()),
             credentials,
@@ -38,10 +38,7 @@ impl GitBackend {
     }
 
     pub fn for_tests() -> Self {
-        Self::new(
-            Arc::new(WindowsCredentialStore),
-            Arc::new(NoopNotifySink),
-        )
+        Self::new(Arc::new(WindowsCredentialStore), Arc::new(NoopNotifySink))
     }
 
     pub fn conflict_dir_for(&self, unix_ts: u64) -> PathBuf {
@@ -81,6 +78,7 @@ impl GitBackend {
         options.include_untracked(true).recurse_untracked_dirs(true);
         let statuses = repo.statuses(Some(&mut options))?;
         if statuses.is_empty() {
+            tracing::debug!("sync commit skipped; no local changes");
             return Ok(false);
         }
 
@@ -98,7 +96,18 @@ impl GitBackend {
             Err(_) => Vec::new(),
         };
         let parent_refs = parents.iter().collect::<Vec<_>>();
-        repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &parent_refs)?;
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parent_refs,
+        )?;
+        tracing::info!(
+            changed_paths = statuses.len(),
+            "committed local sync changes"
+        );
         Ok(true)
     }
 
@@ -114,27 +123,34 @@ impl GitBackend {
         let mut remote = repo.find_remote("origin")?;
         let mut options = FetchOptions::new();
         options.remote_callbacks(git_remote_callbacks(&auth, self.credentials.as_ref()));
+        tracing::debug!(branch = %branch, "fetching sync remote");
         remote.fetch(&[branch], Some(&mut options), None)?;
         Ok(())
     }
 
     fn rebase(&self, repo: &Repository, branch: &str) -> SyncResult<Option<PathBuf>> {
+        tracing::debug!(branch = %branch, "rebasing sync branch");
         let head_ref = repo.head()?;
         let head_annotated = repo.reference_to_annotated_commit(&head_ref)?;
         let upstream_ref = repo.find_reference(&format!("refs/remotes/origin/{branch}"))?;
         let upstream_annotated = repo.reference_to_annotated_commit(&upstream_ref)?;
-        let mut rebase = repo.rebase(Some(&head_annotated), Some(&upstream_annotated), None, None)?;
+        let mut rebase =
+            repo.rebase(Some(&head_annotated), Some(&upstream_annotated), None, None)?;
         let signature = Signature::now("openmacro", "openmacro@example.com")?;
 
         loop {
             match rebase.next() {
                 Some(Ok(_)) => {
                     if repo.index()?.has_conflicts() {
-                        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                        let ts = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
                         let dir = self.conflict_dir_for(ts);
                         write_conflicts(repo, &dir)?;
                         rebase.abort()?;
                         self.notify.sync_conflict(&dir);
+                        tracing::warn!(dir = %dir.display(), "sync conflict detected");
                         return Ok(Some(dir));
                     }
                     rebase.commit(None, &signature, None)?;
@@ -156,13 +172,20 @@ impl GitBackend {
         let mut remote = repo.find_remote("origin")?;
         let mut options = PushOptions::new();
         options.remote_callbacks(git_remote_callbacks(&auth, self.credentials.as_ref()));
-        remote.push(&[&format!("refs/heads/{branch}:refs/heads/{branch}")], Some(&mut options))?;
+        tracing::debug!(branch = %branch, "pushing sync branch");
+        remote.push(
+            &[&format!("refs/heads/{branch}:refs/heads/{branch}")],
+            Some(&mut options),
+        )?;
         Ok(())
     }
 
     fn update_status(&self, repo: &Repository) -> SyncResult<SyncStatus> {
         let branch = Self::current_branch(repo)?;
-        let local_oid = repo.head()?.target().ok_or_else(|| SyncError::State("missing head target".to_string()))?;
+        let local_oid = repo
+            .head()?
+            .target()
+            .ok_or_else(|| SyncError::State("missing head target".to_string()))?;
         let upstream = repo
             .find_branch(&branch, BranchType::Local)?
             .upstream()
@@ -176,8 +199,19 @@ impl GitBackend {
             branch: Some(branch),
             ahead,
             behind,
-            last_tick_unix: Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()),
+            last_tick_unix: Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            ),
         };
+        tracing::debug!(
+            branch = status.branch.as_deref().unwrap_or_default(),
+            ahead = status.ahead,
+            behind = status.behind,
+            "updated sync status"
+        );
         self.state.lock().unwrap().status = status.clone();
         Ok(status)
     }
@@ -190,7 +224,16 @@ impl Default for GitBackend {
 }
 
 impl SyncBackend for GitBackend {
+    #[tracing::instrument(skip(self, auth), fields(remote = %remote, local_dir = %local_dir.display()))]
     fn init(&self, remote: &str, auth: AuthMode, local_dir: &Path) -> SyncResult<()> {
+        tracing::info!(
+            remote = %crate::log_init::redact::redact_str(
+                remote,
+                crate::log_init::redact::FieldKind::Path
+            ),
+            local_dir = %local_dir.display(),
+            "initializing git sync backend"
+        );
         let repo = if local_dir.join(".git").exists() {
             Repository::open(local_dir)?
         } else {
@@ -211,7 +254,9 @@ impl SyncBackend for GitBackend {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     fn tick(&self) -> SyncResult<TickReport> {
+        tracing::debug!("running sync tick");
         let repo = self.open_repo()?;
         let branch = Self::current_branch(&repo)?;
         self.fetch(&repo, &branch)?;
@@ -223,8 +268,15 @@ impl SyncBackend for GitBackend {
         self.push(&repo, &branch)?;
         let status = self.update_status(&repo)?;
         if committed || status.ahead > 0 || status.behind > 0 {
+            tracing::info!(
+                committed,
+                ahead = status.ahead,
+                behind = status.behind,
+                "sync tick synced"
+            );
             Ok(TickReport::Synced { committed })
         } else {
+            tracing::debug!("sync tick found no changes");
             Ok(TickReport::NoChanges)
         }
     }

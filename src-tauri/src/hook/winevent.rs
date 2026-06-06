@@ -31,12 +31,15 @@ pub fn set_denylisted(value: bool) {
     DENYLISTED.store(value, Ordering::Relaxed);
 }
 
-pub fn apply_foreground_change(
-    buffer: &mut MatchBuffer,
-    exe_basename: &str,
-) -> HookEvent {
+pub fn apply_foreground_change(buffer: &mut MatchBuffer, exe_basename: &str) -> HookEvent {
     buffer.reset();
-    set_denylisted(is_denylisted_process(exe_basename));
+    let denylisted = is_denylisted_process(exe_basename);
+    set_denylisted(denylisted);
+    tracing::debug!(
+        exe_basename = %exe_basename,
+        denylisted,
+        "foreground process changed"
+    );
     HookEvent::Reset(ResetCause::ForegroundChange)
 }
 
@@ -50,10 +53,7 @@ pub mod testing {
 
     use super::{apply_foreground_change, HookEvent};
 
-    pub fn inject_foreground_change(
-        buffer: &mut MatchBuffer,
-        exe_basename: &str,
-    ) -> HookEvent {
+    pub fn inject_foreground_change(buffer: &mut MatchBuffer, exe_basename: &str) -> HookEvent {
         apply_foreground_change(buffer, exe_basename)
     }
 }
@@ -92,7 +92,10 @@ mod tests {
 
         let event = testing::inject_foreground_change(&mut buffer, "ConSent.exe");
 
-        assert_eq!(event, crate::hook::HookEvent::Reset(ResetCause::ForegroundChange));
+        assert_eq!(
+            event,
+            crate::hook::HookEvent::Reset(ResetCause::ForegroundChange)
+        );
         assert_eq!(buffer.as_str(), "");
         assert!(super::is_denylisted());
     }
@@ -106,7 +109,10 @@ mod tests {
 
         let event = testing::inject_foreground_change(&mut buffer, "notepad.exe");
 
-        assert_eq!(event, crate::hook::HookEvent::Reset(ResetCause::ForegroundChange));
+        assert_eq!(
+            event,
+            crate::hook::HookEvent::Reset(ResetCause::ForegroundChange)
+        );
         assert_eq!(buffer.as_str(), "");
         assert!(!super::is_denylisted());
     }

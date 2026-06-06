@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-    sync::RwLock,
-};
+use std::{fs, path::PathBuf, sync::RwLock};
 
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -50,12 +46,23 @@ impl PrefsState {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn get_prefs(state: tauri::State<'_, PrefsState>) -> Prefs {
-    get_prefs_inner(state.inner())
+    let prefs = get_prefs_inner(state.inner());
+    tracing::debug!(
+        paused = prefs.paused,
+        autostart = prefs.autostart,
+        max_expansion_len = prefs.max_expansion_len,
+        shell_consent = prefs.shell_consent,
+        "loaded prefs"
+    );
+    prefs
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state, prefs), fields(paused = prefs.paused, autostart = prefs.autostart, shell_consent = prefs.shell_consent))]
 pub fn set_prefs(state: tauri::State<'_, PrefsState>, prefs: Prefs) -> Result<(), String> {
+    tracing::info!("saving prefs");
     set_prefs_inner(state.inner(), prefs)
 }
 
@@ -109,6 +116,7 @@ fn write_prefs(path: &PathBuf, prefs: &Prefs) -> Result<(), String> {
     use std::io::Write;
     temp.write_all(&serialized)
         .map_err(|error| error.to_string())?;
-    temp.persist(path).map_err(|error| error.error.to_string())?;
+    temp.persist(path)
+        .map_err(|error| error.error.to_string())?;
     Ok(())
 }

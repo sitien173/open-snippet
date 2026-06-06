@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 use crate::{
     commands::prefs::Prefs,
+    log_init::redact::{redact_str, FieldKind},
     store::{Snippet, VarKind},
 };
 
@@ -70,12 +71,20 @@ impl<'a> Resolver<'a> {
         self
     }
 
+    #[tracing::instrument(skip(self, snippet, clipboard_reader, form_values), fields(snippet_id = %snippet.id, has_form_values = form_values.is_some()))]
     pub fn resolve(
         &self,
         snippet: &Snippet,
         clipboard_reader: &mut impl ClipboardReader,
         form_values: Option<&BTreeMap<String, String>>,
     ) -> Result<Resolved, ResolveError> {
+        // SECURITY: snippet replacement bodies are user content; log only through log_body! redaction.
+        tracing::debug!(
+            snippet_id = %snippet.id,
+            body = %crate::log_body!(&snippet.replace),
+            has_form_values = form_values.is_some(),
+            "resolving snippet"
+        );
         let mut rendered = String::with_capacity(snippet.replace.len());
         let mut rest = snippet.replace.as_str();
 
@@ -97,12 +106,20 @@ impl<'a> Resolver<'a> {
         let (text, cursor_chars_after_token) =
             strip_cursor_token(&rendered).expect("loader validates cursor token count");
 
+        tracing::debug!(
+            snippet_id = %snippet.id,
+            output_chars = text.chars().count(),
+            cursor_chars_after_token,
+            "snippet resolved"
+        );
+
         Ok(Resolved {
             text,
             cursor_chars_after_token,
         })
     }
 
+    #[tracing::instrument(skip(self, snippet, clipboard_reader, form_values), fields(snippet_id = %snippet.id, placeholder = %name))]
     fn resolve_placeholder(
         &self,
         snippet: &Snippet,
@@ -113,15 +130,24 @@ impl<'a> Resolver<'a> {
     ) -> Result<String, ResolveError> {
         if let Some(values) = form_values {
             if let Some(value) = values.get(name) {
+                // SECURITY: form values are user content and may contain secrets.
+                tracing::debug!(
+                    snippet_id = %snippet.id,
+                    placeholder = %name,
+                    value = %redact_str(value, FieldKind::FormValue),
+                    "resolved form placeholder"
+                );
                 return Ok(value.clone());
             }
         }
 
         if let Some(var) = snippet.vars.iter().find(|var| var.name == name) {
             return Ok(match var.kind {
-                VarKind::Text | VarKind::Textarea | VarKind::Choice | VarKind::Number | VarKind::Form => {
-                    var.default.clone().unwrap_or_default()
-                }
+                VarKind::Text
+                | VarKind::Textarea
+                | VarKind::Choice
+                | VarKind::Number
+                | VarKind::Form => var.default.clone().unwrap_or_default(),
                 VarKind::Datetime => {
                     resolve_datetime(arg.or(var.format.as_deref()), "%Y-%m-%d %H:%M:%S")
                 }
@@ -143,17 +169,20 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    #[tracing::instrument(skip(self, snippet, var), fields(snippet_id = %snippet.id, var = %var.name))]
     fn resolve_shell_var(
         &self,
         snippet: &Snippet,
         var: &crate::store::VarDecl,
     ) -> Result<String, ResolveError> {
         if !self.prefs.shell_consent {
+            tracing::debug!(snippet_id = %snippet.id, var = %var.name, "shell variable disabled");
             return Err(ResolveError::ShellDisabled {
                 name: var.name.clone(),
             });
         }
         if var.confirm && !self.notify.confirm_shell(&snippet.id, &var.name, &var.cmd) {
+            tracing::debug!(snippet_id = %snippet.id, var = %var.name, "shell variable declined");
             return Err(ResolveError::ShellDeclined {
                 name: var.name.clone(),
             });

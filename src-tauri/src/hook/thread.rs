@@ -16,7 +16,9 @@ pub struct HookHandle {
 }
 
 impl Hook {
+    #[tracing::instrument]
     pub fn start() -> Result<(HookHandle, HookConsumer), String> {
+        tracing::info!("starting keyboard hook");
         let (mut producer, consumer) = channel(RING_CAPACITY);
         let (ready_tx, ready_rx) = mpsc::channel();
 
@@ -37,18 +39,23 @@ impl Hook {
 
             if let Err(payload) = result {
                 let _ = crate::crash::write_caught_panic_dump("hook thread", payload.as_ref());
+                tracing::error!("hook thread panicked");
                 let _ = ready_tx.send(Err("hook thread panicked".to_string()));
             }
         });
 
         match ready_rx.recv().map_err(|error| error.to_string())? {
-            Ok(()) => Ok((
-                HookHandle {
-                    join_handle: Some(join_handle),
-                },
-                consumer,
-            )),
+            Ok(()) => {
+                tracing::info!("keyboard hook started");
+                Ok((
+                    HookHandle {
+                        join_handle: Some(join_handle),
+                    },
+                    consumer,
+                ))
+            }
             Err(error) => {
+                tracing::error!(error = %error, "keyboard hook failed to start");
                 let _ = join_handle.join();
                 Err(error)
             }
@@ -72,12 +79,12 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
         Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
         UI::{
             Input::KeyboardAndMouse::{
-                GetKeyboardLayout, GetKeyState, GetKeyboardState, ToUnicodeEx, VK_BACK,
-                VK_CAPITAL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+                GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK, VK_CAPITAL,
+                VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
             },
             WindowsAndMessaging::{
-                CallNextHookEx, DispatchMessageW, GetMessageW, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT,
-                MSG, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+                CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+                UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
                 WM_KEYDOWN, WM_SYSKEYDOWN,
             },
         },
@@ -85,11 +92,7 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
 
     static HOOK_PRODUCER: AtomicPtr<HookProducer> = AtomicPtr::new(ptr::null_mut());
 
-    unsafe extern "system" fn keyboard_proc(
-        code: i32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT {
+    unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 {
             let message = wparam.0 as u32;
             if message == WM_KEYDOWN || message == WM_SYSKEYDOWN {
@@ -150,7 +153,8 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
     HOOK_PRODUCER.store(producer as *mut HookProducer, Ordering::Relaxed);
 
     // SAFETY: installing a WH_KEYBOARD_LL hook with a static callback is required to receive events.
-    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), HINSTANCE::default(), 0)? };
+    let hook =
+        unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), HINSTANCE::default(), 0)? };
 
     let mut message = MSG::default();
     // SAFETY: standard message pump for the hook thread.

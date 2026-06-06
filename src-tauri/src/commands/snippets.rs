@@ -123,26 +123,41 @@ pub fn load_snippet_store_state() -> Result<SnippetStoreState, String> {
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn list_snippets(state: tauri::State<'_, SnippetStoreState>) -> Vec<SnippetDto> {
-    list_snippets_inner(state.inner())
+    let snippets = list_snippets_inner(state.inner());
+    tracing::debug!(count = snippets.len(), "listed snippets");
+    snippets
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state, payload), fields(trigger = %payload.trigger, source_file = %payload.source_file.display()))]
 pub fn save_snippet(
     state: tauri::State<'_, SnippetStoreState>,
     payload: SaveSnippetDto,
 ) -> Result<(), String> {
+    tracing::info!("saving snippet");
     save_snippet_inner(state.inner(), payload)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn reload_snippets(state: tauri::State<'_, SnippetStoreState>) -> Result<ReloadResult, String> {
-    reload_snippets_inner(state.inner())
+    let result = reload_snippets_inner(state.inner())?;
+    tracing::info!(
+        loaded = result.loaded,
+        errors = result.errors.len(),
+        "reloaded snippets"
+    );
+    Ok(result)
 }
 
 #[tauri::command]
+#[tracing::instrument(skip(state))]
 pub fn list_load_errors(state: tauri::State<'_, SnippetStoreState>) -> Vec<LoadErrorDto> {
-    list_load_errors_inner(state.inner())
+    let errors = list_load_errors_inner(state.inner());
+    tracing::debug!(count = errors.len(), "listed snippet load errors");
+    errors
 }
 
 pub fn list_snippets_inner(state: &SnippetStoreState) -> Vec<SnippetDto> {
@@ -161,7 +176,10 @@ pub fn list_snippets_inner(state: &SnippetStoreState) -> Vec<SnippetDto> {
         .collect()
 }
 
-pub fn save_snippet_inner(_state: &SnippetStoreState, payload: SaveSnippetDto) -> Result<(), String> {
+pub fn save_snippet_inner(
+    _state: &SnippetStoreState,
+    payload: SaveSnippetDto,
+) -> Result<(), String> {
     let mut document = read_yaml_document(&payload.source_file)?;
 
     let replacement = SnippetDocument {
@@ -233,7 +251,8 @@ fn write_yaml_document(path: &Path, document: &RootDocument) -> Result<(), Strin
     use std::io::Write;
     temp.write_all(serialized.as_bytes())
         .map_err(|error| error.to_string())?;
-    temp.persist(path).map_err(|error| error.error.to_string())?;
+    temp.persist(path)
+        .map_err(|error| error.error.to_string())?;
     Ok(())
 }
 

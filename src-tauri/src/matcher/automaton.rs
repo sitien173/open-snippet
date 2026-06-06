@@ -38,17 +38,19 @@ impl Matcher {
         }
     }
 
-    pub fn rebuild(
-        &mut self,
-        snippets: &[Snippet],
-    ) -> Result<(), aho_corasick::BuildError> {
+    #[tracing::instrument(skip(self, snippets), fields(snippet_count = snippets.len()))]
+    pub fn rebuild(&mut self, snippets: &[Snippet]) -> Result<(), aho_corasick::BuildError> {
+        tracing::debug!(snippet_count = snippets.len(), "rebuilding matcher");
         self.patterns.clear();
         if snippets.is_empty() {
             self.automaton = None;
             return Ok(());
         }
 
-        let patterns: Vec<&str> = snippets.iter().map(|snippet| snippet.trigger.as_str()).collect();
+        let patterns: Vec<&str> = snippets
+            .iter()
+            .map(|snippet| snippet.trigger.as_str())
+            .collect();
         self.patterns = snippets
             .iter()
             .map(|snippet| PatternMeta {
@@ -61,9 +63,11 @@ impl Matcher {
                 .match_kind(MatchKind::LeftmostLongest)
                 .build(patterns)?,
         );
+        tracing::debug!(pattern_count = self.patterns.len(), "matcher rebuilt");
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, buffer, ch), fields(buffer_len = buffer.len()))]
     pub fn on_char(&mut self, buffer: &mut MatchBuffer, ch: char) -> Option<MatchHit> {
         buffer.push_char(ch);
 
@@ -90,7 +94,9 @@ impl Matcher {
                 continue;
             }
 
-            let Some(start_char_index) = byte_start_to_char_index(&byte_offsets, buffer_len, mat.start()) else {
+            let Some(start_char_index) =
+                byte_start_to_char_index(&byte_offsets, buffer_len, mat.start())
+            else {
                 continue;
             };
 
@@ -120,6 +126,14 @@ impl Matcher {
             {
                 best_hit = Some(candidate);
             }
+        }
+
+        if let Some(hit) = &best_hit {
+            tracing::debug!(
+                snippet_id = %hit.snippet_id,
+                trigger_len_chars = hit.trigger_len_chars,
+                "trigger matched"
+            );
         }
 
         best_hit

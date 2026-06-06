@@ -1,4 +1,7 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use git2::{Index, Repository};
 
@@ -7,7 +10,13 @@ use super::{SyncError, SyncResult};
 pub fn write_conflicts(repo: &Repository, conflict_root: &Path) -> SyncResult<()> {
     fs::create_dir_all(conflict_root).map_err(|error| SyncError::State(error.to_string()))?;
     let index = repo.index()?;
-    for conflict in conflict_entries(&index)? {
+    let conflicts = conflict_entries(&index)?;
+    tracing::warn!(
+        conflict_root = %conflict_root.display(),
+        conflict_count = conflicts.len(),
+        "writing sync conflicts"
+    );
+    for conflict in conflicts {
         if let Some(parent) = conflict_root.join(&conflict).parent() {
             fs::create_dir_all(parent).map_err(|error| SyncError::State(error.to_string()))?;
         }

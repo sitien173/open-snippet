@@ -61,6 +61,15 @@ impl ClipboardBackend for MockClipboardBackend {
         text: &str,
         _timeout: Duration,
     ) -> Result<(), InjectError> {
+        // SECURITY: clipboard payload is user content; log redacted text only.
+        tracing::debug!(
+            text = %crate::log_init::redact::redact_str(
+                text,
+                crate::log_init::redact::FieldKind::ClipboardText
+            ),
+            chars = text.chars().count(),
+            "mock clipboard paste"
+        );
         sink.send(KeyboardAction::Paste(text.to_string()));
         Ok(())
     }
@@ -72,7 +81,19 @@ impl ClipboardReader for SystemClipboardBackend {
     fn read_text(&mut self) -> Option<String> {
         #[cfg(windows)]
         {
-            capture_clipboard().ok()?.text_content()
+            let text = capture_clipboard().ok()?.text_content();
+            if let Some(text) = &text {
+                // SECURITY: clipboard payload is user content; log redacted text only.
+                tracing::debug!(
+                    text = %crate::log_init::redact::redact_str(
+                        text,
+                        crate::log_init::redact::FieldKind::ClipboardText
+                    ),
+                    chars = text.chars().count(),
+                    "read clipboard text"
+                );
+            }
+            text
         }
 
         #[cfg(not(windows))]
@@ -91,6 +112,15 @@ impl ClipboardBackend for SystemClipboardBackend {
     ) -> Result<(), InjectError> {
         #[cfg(windows)]
         {
+            // SECURITY: clipboard payload is user content; log redacted text only.
+            tracing::debug!(
+                text = %crate::log_init::redact::redact_str(
+                    text,
+                    crate::log_init::redact::FieldKind::ClipboardText
+                ),
+                chars = text.chars().count(),
+                "system clipboard paste"
+            );
             let snapshot = capture_clipboard()?;
             let _guard = ClipboardGuard::open(timeout)?;
             clear_clipboard()?;
@@ -104,7 +134,9 @@ impl ClipboardBackend for SystemClipboardBackend {
         #[cfg(not(windows))]
         {
             let _ = (sink, text, timeout);
-            Err(InjectError::new("clipboard paste unsupported on this platform"))
+            Err(InjectError::new(
+                "clipboard paste unsupported on this platform",
+            ))
         }
     }
 }
@@ -135,6 +167,15 @@ impl ClipboardBackend for TestClipboardBackend {
         text: &str,
         _timeout: Duration,
     ) -> Result<(), InjectError> {
+        // SECURITY: clipboard payload is user content; log redacted text only.
+        tracing::debug!(
+            text = %crate::log_init::redact::redact_str(
+                text,
+                crate::log_init::redact::FieldKind::ClipboardText
+            ),
+            chars = text.chars().count(),
+            "test clipboard paste"
+        );
         sink.send(KeyboardAction::Paste(text.to_string()));
         Ok(())
     }
@@ -267,8 +308,8 @@ fn set_clipboard_bytes(format: u32, bytes: &[u8]) -> Result<(), InjectError> {
 
     unsafe {
         // SAFETY: allocates a movable global buffer owned by the clipboard after SetClipboardData succeeds.
-        let memory =
-            GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|error| InjectError::new(error.to_string()))?;
+        let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
+            .map_err(|error| InjectError::new(error.to_string()))?;
         if memory.is_invalid() {
             return Err(InjectError::new("GlobalAlloc failed"));
         }

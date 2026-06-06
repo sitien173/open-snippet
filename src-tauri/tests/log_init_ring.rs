@@ -60,3 +60,18 @@ fn ring_layer_captures_event_metadata_fields_and_spans() {
     assert_eq!(entries[0].fields["answer"], 42);
     assert_eq!(entries[0].span_path, vec!["outer".to_string()]);
 }
+
+#[test]
+fn ring_layer_preserves_debug_string_escapes() {
+    let ring = Arc::new(RingBuffer::new(2000));
+    let subscriber = tracing_subscriber::registry().with(RingLayer::new(Arc::clone(&ring)));
+    let value = r#"path \"quoted\" tail"#;
+
+    tracing::subscriber::with_default(subscriber, || {
+        tracing::info!(value = ?value, "debug field");
+    });
+
+    let entries = ring.slice_since(0);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].fields["value"], format!("{value:?}"));
+}

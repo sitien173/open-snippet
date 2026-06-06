@@ -85,7 +85,12 @@ pub fn capture_foreground() -> Option<ForegroundWindow> {
 }
 
 pub fn capture_foreground_with(backend: &impl FocusBackend) -> Option<ForegroundWindow> {
-    backend.capture_foreground()
+    let hwnd = backend.capture_foreground();
+    tracing::debug!(
+        hwnd = hwnd.map(|value| value.0),
+        "captured foreground window"
+    );
+    hwnd
 }
 
 pub fn restore_foreground(hwnd: ForegroundWindow) -> Result<(), FocusError> {
@@ -96,7 +101,13 @@ pub fn restore_foreground_with(
     backend: &impl FocusBackend,
     hwnd: ForegroundWindow,
 ) -> Result<(), FocusError> {
-    backend.restore_foreground(hwnd)
+    let result = backend.restore_foreground(hwnd);
+    if let Err(error) = &result {
+        tracing::warn!(hwnd = hwnd.0, error = %error, "foreground restore failed");
+    } else {
+        tracing::debug!(hwnd = hwnd.0, "foreground restored");
+    }
+    result
 }
 
 #[cfg(windows)]
@@ -150,7 +161,10 @@ fn restore_foreground_impl(hwnd: ForegroundWindow) -> Result<(), FocusError> {
         }
         .as_bool();
     }
-    if foreground_thread != 0 && foreground_thread != self_thread && foreground_thread != target_thread {
+    if foreground_thread != 0
+        && foreground_thread != self_thread
+        && foreground_thread != target_thread
+    {
         attached_foreground = unsafe {
             // SAFETY: temporary thread input attachment for foreground activation retry.
             AttachThreadInput(self_thread, foreground_thread, true)

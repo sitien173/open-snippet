@@ -84,6 +84,7 @@ fn all_reset_events_clear_the_buffer() {
 }
 
 #[test]
+#[tracing_test::traced_test]
 fn longest_match_wins() {
     let mut matcher = Matcher::new();
     matcher

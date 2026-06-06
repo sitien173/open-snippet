@@ -24,6 +24,21 @@ pub fn channel(capacity: usize) -> (HookProducer, HookConsumer) {
 
 impl HookProducer {
     pub fn push(&mut self, event: HookEvent) -> bool {
+        // SECURITY: hook character content is typed user input; redact unless verbose logging is explicitly enabled.
+        match event {
+            HookEvent::Char(ch) => tracing::debug!(
+                kind = "char",
+                ch = %crate::log_init::redact::redact_str(
+                    &ch.to_string(),
+                    crate::log_init::redact::FieldKind::FormValue
+                ),
+                "queued hook event"
+            ),
+            HookEvent::Backspace => tracing::debug!(kind = "backspace", "queued hook event"),
+            HookEvent::Reset(cause) => {
+                tracing::debug!(kind = "reset", cause = ?cause, "queued hook event")
+            }
+        }
         self.inner.push(event).is_ok()
     }
 }
@@ -49,7 +64,10 @@ mod tests {
 
         assert_eq!(consumer.pop(), Some(HookEvent::Char('a')));
         assert_eq!(consumer.pop(), Some(HookEvent::Backspace));
-        assert_eq!(consumer.pop(), Some(HookEvent::Reset(ResetCause::CapsToggle)));
+        assert_eq!(
+            consumer.pop(),
+            Some(HookEvent::Reset(ResetCause::CapsToggle))
+        );
         assert_eq!(consumer.pop(), None);
     }
 

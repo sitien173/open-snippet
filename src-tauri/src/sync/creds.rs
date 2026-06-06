@@ -44,10 +44,13 @@ pub struct WindowsCredentialStore;
 
 impl CredentialStore for WindowsCredentialStore {
     fn read(&self, key: &str) -> Result<Option<SyncCredential>, String> {
+        tracing::debug!(key = %key, "reading sync credential");
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::Security::Credentials::{CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC};
             use windows::core::PCWSTR;
+            use windows::Win32::Security::Credentials::{
+                CredFree, CredReadW, CREDENTIALW, CRED_TYPE_GENERIC,
+            };
 
             let key_utf16 = to_utf16(key);
             let mut credential_ptr: *mut CREDENTIALW = ptr::null_mut();
@@ -71,7 +74,8 @@ impl CredentialStore for WindowsCredentialStore {
                 credential.CredentialBlob,
                 credential.CredentialBlobSize as usize,
             );
-            let secret = String::from_utf8(secret_bytes.to_vec()).map_err(|error| error.to_string())?;
+            let secret =
+                String::from_utf8(secret_bytes.to_vec()).map_err(|error| error.to_string())?;
             CredFree(credential_ptr.cast::<c_void>());
             Ok(Some(SyncCredential {
                 username,
@@ -87,10 +91,14 @@ impl CredentialStore for WindowsCredentialStore {
     }
 
     fn write(&self, key: &str, credential: &SyncCredential) -> Result<(), String> {
+        // SECURITY: credential secret is never logged; only key and username metadata are recorded.
+        tracing::debug!(key = %key, username = %credential.username, "writing sync credential");
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::Security::Credentials::{CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC};
             use windows::core::PWSTR;
+            use windows::Win32::Security::Credentials::{
+                CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+            };
 
             let key_utf16 = to_utf16(key);
             let user_utf16 = to_utf16(&credential.username);
@@ -120,10 +128,11 @@ impl CredentialStore for WindowsCredentialStore {
     }
 
     fn delete(&self, key: &str) -> Result<(), String> {
+        tracing::debug!(key = %key, "deleting sync credential");
         #[cfg(windows)]
         unsafe {
-            use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
             use windows::core::PCWSTR;
+            use windows::Win32::Security::Credentials::{CredDeleteW, CRED_TYPE_GENERIC};
 
             let key_utf16 = to_utf16(key);
             CredDeleteW(PCWSTR::from_raw(key_utf16.as_ptr()), CRED_TYPE_GENERIC, 0)
@@ -145,6 +154,11 @@ pub fn git_remote_callbacks<'a>(
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(move |_url, username_from_url, allowed| match auth {
         AuthMode::HttpsPat { host, username } => {
+            tracing::debug!(
+                host = %host,
+                username = %username_from_url.unwrap_or(username),
+                "providing https sync credential"
+            );
             if !allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
                 return Err(git2::Error::from_str("https credentials not allowed"));
             }
@@ -194,7 +208,7 @@ fn from_pcwstr(value: windows::core::PWSTR) -> String {
 mod tests {
     use std::{collections::HashMap, sync::Mutex};
 
-    use super::{CredentialStore, Secret, SyncCredential, credential_key};
+    use super::{credential_key, CredentialStore, Secret, SyncCredential};
 
     #[derive(Default)]
     struct MockStore {

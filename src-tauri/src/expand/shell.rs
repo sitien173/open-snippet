@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use crate::log_init::redact::{redact_str, FieldKind};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellError {
     Disabled,
@@ -30,7 +32,14 @@ impl ShellBackend for NoopShellBackend {
 pub struct TokioShellBackend;
 
 impl ShellBackend for TokioShellBackend {
+    #[tracing::instrument(skip(self, args), fields(argc = args.len(), cwd = %cwd.display(), timeout_ms = timeout.as_millis()))]
     fn run(&self, args: &[String], cwd: &Path, timeout: Duration) -> Result<String, ShellError> {
+        tracing::debug!(
+            argc = args.len(),
+            cwd = %cwd.display(),
+            timeout_ms = timeout.as_millis(),
+            "running shell variable"
+        );
         let args = args.to_vec();
         let cwd = cwd.to_path_buf();
 
@@ -46,8 +55,14 @@ impl ShellBackend for TokioShellBackend {
     }
 }
 
-async fn run_command(args: Vec<String>, cwd: PathBuf, timeout: Duration) -> Result<String, ShellError> {
+#[tracing::instrument(skip(args), fields(argc = args.len(), cwd = %cwd.display(), timeout_ms = timeout.as_millis()))]
+async fn run_command(
+    args: Vec<String>,
+    cwd: PathBuf,
+    timeout: Duration,
+) -> Result<String, ShellError> {
     if args.is_empty() {
+        tracing::warn!("shell command missing argv");
         return Err(ShellError::Spawn("missing shell argv".to_string()));
     }
 
@@ -66,20 +81,34 @@ async fn run_command(args: Vec<String>, cwd: PathBuf, timeout: Duration) -> Resu
         .map_err(|error| ShellError::Spawn(error.to_string()))?;
 
     #[cfg(windows)]
-    let _job = assign_job_object(child.id())
-        .map_err(|error| ShellError::Spawn(error.to_string()))?;
+    let _job =
+        assign_job_object(child.id()).map_err(|error| ShellError::Spawn(error.to_string()))?;
 
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
-        Ok(Err(error)) => return Err(ShellError::Spawn(error.to_string())),
-        Err(_) => return Err(ShellError::Timeout),
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "shell command wait failed");
+            return Err(ShellError::Spawn(error.to_string()));
+        }
+        Err(_) => {
+            tracing::warn!("shell command timed out");
+            return Err(ShellError::Timeout);
+        }
     };
 
     if !output.status.success() {
+        tracing::warn!(status = ?output.status.code(), "shell command exited unsuccessfully");
         return Err(ShellError::Exit(output.status.code()));
     }
 
-    decode_stdout(output.stdout)
+    let stdout = decode_stdout(output.stdout)?;
+    // SECURITY: shell stdout may contain user content or secrets.
+    tracing::debug!(
+        stdout = %redact_str(&stdout, FieldKind::FormValue),
+        chars = stdout.chars().count(),
+        "shell command completed"
+    );
+    Ok(stdout)
 }
 
 pub fn decode_stdout(stdout: Vec<u8>) -> Result<String, ShellError> {
@@ -102,13 +131,11 @@ impl Drop for OwnedHandle {
 #[cfg(windows)]
 fn assign_job_object(pid: Option<u32>) -> Result<OwnedHandle, String> {
     use windows::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-        JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
-    use windows::Win32::System::Threading::{
-        OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-    };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE};
 
     let pid = pid.ok_or_else(|| "spawned process missing pid".to_string())?;
     unsafe {
@@ -125,8 +152,8 @@ fn assign_job_object(pid: Option<u32>) -> Result<OwnedHandle, String> {
         )
         .map_err(|error| error.to_string())?;
 
-        let process =
-            OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid).map_err(|error| error.to_string())?;
+        let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid)
+            .map_err(|error| error.to_string())?;
         let process = OwnedHandle(process);
         AssignProcessToJobObject(job.0, process.0).map_err(|error| error.to_string())?;
 

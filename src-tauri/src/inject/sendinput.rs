@@ -7,6 +7,10 @@ pub struct WindowsKeyboardSink;
 
 impl KeyboardSink for WindowsKeyboardSink {
     fn send(&mut self, action: KeyboardAction) {
+        tracing::debug!(
+            action = keyboard_action_label(&action),
+            "sending keyboard action"
+        );
         #[cfg(windows)]
         {
             send_windows_action(action);
@@ -19,11 +23,20 @@ impl KeyboardSink for WindowsKeyboardSink {
     }
 }
 
+fn keyboard_action_label(action: &KeyboardAction) -> &'static str {
+    match action {
+        KeyboardAction::Backspace => "backspace",
+        KeyboardAction::LeftArrow => "left_arrow",
+        KeyboardAction::Unicode(_) => "unicode",
+        KeyboardAction::Paste(_) => "paste",
+    }
+}
+
 #[cfg(windows)]
 fn send_windows_action(action: KeyboardAction) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VK_BACK, VK_CONTROL, VK_LEFT, VIRTUAL_KEY,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_CONTROL, VK_LEFT,
     };
 
     fn send_inputs(inputs: &mut [INPUT]) {

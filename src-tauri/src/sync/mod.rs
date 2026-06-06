@@ -94,24 +94,30 @@ pub fn spawn_driver(
     mut watcher: watch::Receiver<Arc<crate::store::watcher::SnapshotInner>>,
 ) -> DriverHandle {
     let (trigger_tx, mut trigger_rx) = mpsc::channel::<()>(8);
+    tracing::info!("starting sync driver");
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    tracing::debug!("sync driver interval tick");
                     let _ = backend.tick();
                 }
                 changed = watcher.changed() => {
                     if changed.is_err() {
+                        tracing::debug!("sync driver watcher closed");
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    tracing::debug!("sync driver watcher tick");
                     let _ = backend.tick();
                 }
                 maybe_trigger = trigger_rx.recv() => {
                     if maybe_trigger.is_none() {
+                        tracing::debug!("sync driver trigger channel closed");
                         break;
                     }
+                    tracing::debug!("sync driver manual tick");
                     let _ = backend.tick();
                 }
             }
@@ -122,7 +128,11 @@ pub fn spawn_driver(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use git2::{IndexAddOption, Repository, Signature};
     use tempfile::TempDir;
@@ -152,8 +162,15 @@ mod tests {
             .into_iter()
             .collect::<Vec<_>>();
         let parent_refs = parents.iter().collect::<Vec<_>>();
-        repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &parent_refs)
-            .unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parent_refs,
+        )
+        .unwrap();
     }
 
     fn seed_bare_remote() -> (TempDir, String) {
@@ -166,7 +183,9 @@ mod tests {
         write_file(&seed_dir, "README.md", "seed\n");
         commit_all(&repo, "seed");
         let mut remote = repo.remote("origin", bare_dir.to_str().unwrap()).unwrap();
-        remote.push(&["refs/heads/master:refs/heads/master"], None).unwrap();
+        remote
+            .push(&["refs/heads/master:refs/heads/master"], None)
+            .unwrap();
 
         (root, bare_dir.to_string_lossy().into_owned())
     }
@@ -177,14 +196,15 @@ mod tests {
         let local = TempDir::new().unwrap();
         let backend = GitBackend::for_tests();
 
-        backend
-            .init(&remote, AuthMode::Ssh, local.path())
-            .unwrap();
+        backend.init(&remote, AuthMode::Ssh, local.path()).unwrap();
 
         let report = backend.tick().unwrap();
         let status = backend.status();
 
-        assert!(matches!(report, TickReport::Synced { .. } | TickReport::NoChanges));
+        assert!(matches!(
+            report,
+            TickReport::Synced { .. } | TickReport::NoChanges
+        ));
         assert_eq!(status.branch.as_deref(), Some("master"));
         assert_eq!(status.ahead, 0);
         assert_eq!(status.behind, 0);
@@ -195,18 +215,21 @@ mod tests {
         let (_root, remote) = seed_bare_remote();
         let local = TempDir::new().unwrap();
         let backend = GitBackend::for_tests();
-        backend
-            .init(&remote, AuthMode::Ssh, local.path())
-            .unwrap();
+        backend.init(&remote, AuthMode::Ssh, local.path()).unwrap();
 
-        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let dir = backend.conflict_dir_for(ts);
         let tail = dir.file_name().unwrap().to_string_lossy().to_string();
 
         assert_eq!(tail, ts.to_string());
         assert_eq!(
             dir,
-            PathBuf::from(local.path()).join(".conflicts").join(ts.to_string())
+            PathBuf::from(local.path())
+                .join(".conflicts")
+                .join(ts.to_string())
         );
     }
 }

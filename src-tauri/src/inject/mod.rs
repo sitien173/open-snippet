@@ -97,7 +97,14 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
         &mut self.clipboard
     }
 
+    #[tracing::instrument(skip(self, plan), fields(backspaces = plan.backspaces, caret_left = plan.caret_left, text_chars = plan.text.chars().count()))]
     pub fn inject(&mut self, plan: InjectPlan) -> Result<(), InjectError> {
+        // SECURITY: injected text is snippet output/user content; log only redacted body plus counts.
+        tracing::debug!(
+            text = %crate::log_body!(&plan.text),
+            max_clipboard_bytes = plan.max_clipboard_bytes,
+            "injecting text"
+        );
         SUSPEND.store(true, Ordering::Relaxed);
 
         for _ in 0..plan.backspaces {
@@ -112,9 +119,12 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
         };
 
         if paste_result.is_err() {
+            tracing::debug!("clipboard paste failed or bypassed; falling back to unicode input");
             for ch in plan.text.chars() {
                 self.sink.send(KeyboardAction::Unicode(ch));
             }
+        } else {
+            tracing::debug!("clipboard paste succeeded");
         }
 
         for _ in 0..plan.caret_left {
@@ -122,6 +132,7 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
         }
 
         SUSPEND.store(false, Ordering::Relaxed);
+        tracing::debug!("text injection completed");
         Ok(())
     }
 }
