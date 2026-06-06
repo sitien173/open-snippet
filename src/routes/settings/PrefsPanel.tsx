@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { Prefs, getPrefs, listSnippets, setPrefs } from "../../lib/snippets";
 import { ShellConsentDialog } from "./ShellConsentDialog";
 import { I } from "../../lib/icons";
+import { getLogger } from "../../lib/logger";
+
+const log = getLogger("settings.prefs");
 
 export function PrefsPanel() {
   const [prefs, setPrefsState] = useState<Prefs | null>(null);
@@ -18,7 +21,7 @@ export function PrefsPanel() {
         setLoading(false);
       })
       .catch((err) => {
-        console.error("Failed to load preferences", err);
+        log.error("Failed to load preferences", { error: err });
         setLoading(false);
       });
   }, []);
@@ -32,7 +35,7 @@ export function PrefsPanel() {
       setTimeout(() => setSaveStatus(null), 2000);
     } catch (err) {
       setSaveStatus("Error saving");
-      console.error(err);
+      log.error("Failed to persist preferences", { error: err });
     }
   };
 
@@ -51,7 +54,7 @@ export function PrefsPanel() {
         }
       })
       .catch((err) => {
-        console.error("Failed to inspect snippets for shell consent", err);
+        log.error("Failed to inspect snippets for shell consent", { error: err });
       });
   }, [checkedInitialConsent, prefs]);
 

@@ -4,7 +4,10 @@ import { listSnippets, Snippet } from "../../lib/snippets";
 import { formSubmit, formCancel } from "../../lib/form";
 import { FieldRenderer } from "./FieldRenderer";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getLogger } from "../../lib/logger";
 import "./Form.css";
+
+const log = getLogger("form");
 
 export const FormRoute: React.FC = () => {
   const { snippetId } = useParams<{ snippetId: string }>();
@@ -18,7 +21,7 @@ export const FormRoute: React.FC = () => {
   const handleCancel = useCallback(() => {
     if (!snippetId) return;
     formCancel(snippetId)
-      .catch((err) => console.error("Cancel IPC failed", err))
+      .catch((err) => log.error("Cancel IPC failed", { error: err }))
       .finally(() => {
         try {
           getCurrentWindow().close();
@@ -57,7 +60,7 @@ export const FormRoute: React.FC = () => {
       })
       .catch((err) => {
         if (!active) return;
-        console.error("Failed to load snippets", err);
+        log.error("Failed to load snippets", { error: err });
         setErrorMsg("Failed to load snippet form.");
         setLoading(false);
       });
@@ -157,7 +160,7 @@ export const FormRoute: React.FC = () => {
     setErrors({});
 
     formSubmit(snippetId, values)
-      .catch((err) => console.error("Submit IPC failed", err))
+      .catch((err) => log.error("Submit IPC failed", { error: err }))
       .finally(() => {
         try {
           getCurrentWindow().close();

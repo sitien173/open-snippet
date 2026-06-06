@@ -6,6 +6,10 @@ import { PrefsPanel } from "./PrefsPanel";
 import { SyncPanel } from "./SyncPanel";
 import { I } from "../../lib/icons";
 
+import { getLogger } from "../../lib/logger";
+
+const log = getLogger("settings");
+
 export function Settings() {
   const [activeTab, setActiveTab] = useState<"snippets" | "preferences" | "sync">("snippets");
   const [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -19,7 +23,7 @@ export function Settings() {
       const data = await listSnippets();
       setSnippets(data);
     } catch (err) {
-      console.error("Failed to load snippets", err);
+      log.error("Failed to load snippets", { error: err });
     } finally {
       setLoading(false);
     }

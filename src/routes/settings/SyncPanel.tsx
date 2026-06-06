@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { syncInit, SyncAuthMode, syncStatus, SyncStatus, syncTestConnection, syncTickNow, TickReport } from "../../lib/sync";
 import { I } from "../../lib/icons";
 
+import { getLogger } from "../../lib/logger";
+
+const log = getLogger("settings.sync");
+
 type AuthChoice = "https" | "ssh";
 
 const EMPTY_STATUS: SyncStatus = {
@@ -28,7 +32,7 @@ export function SyncPanel() {
         setLoadingStatus(false);
       })
       .catch((error) => {
-        console.error("Failed to load sync status", error);
+        log.error("Failed to load sync status", { error });
         setLoadingStatus(false);
       });
   }, []);
