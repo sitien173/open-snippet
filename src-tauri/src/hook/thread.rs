@@ -13,6 +13,12 @@ pub struct Hook;
 
 pub struct HookHandle {
     join_handle: Option<JoinHandle<()>>,
+    thread_id: Option<u32>,
+}
+
+struct HookReady {
+    thread_id: Option<u32>,
+    result: Result<(), String>,
 }
 
 impl Hook {
@@ -26,30 +32,48 @@ impl Hook {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 #[cfg(windows)]
                 {
-                    let result = run_hook_thread(&mut producer);
-                    let _ = ready_tx.send(result.map_err(|error| error.to_string()));
+                    use windows::Win32::System::Threading::GetCurrentThreadId;
+
+                    let thread_id = unsafe { GetCurrentThreadId() };
+                    let result = run_hook_thread(&mut producer, |result| {
+                        let _ = ready_tx.send(HookReady {
+                            thread_id: Some(thread_id),
+                            result,
+                        });
+                    });
+                    if let Err(error) = result {
+                        tracing::error!(error = %error, "hook thread exited with error");
+                    }
                 }
 
                 #[cfg(not(windows))]
                 {
                     let _ = producer.push(HookEvent::Reset(ResetCause::ImeOrComposition));
-                    let _ = ready_tx.send(Ok(()));
+                    let _ = ready_tx.send(HookReady {
+                        thread_id: None,
+                        result: Ok(()),
+                    });
                 }
             }));
 
             if let Err(payload) = result {
                 let _ = crate::crash::write_caught_panic_dump("hook thread", payload.as_ref());
                 tracing::error!("hook thread panicked");
-                let _ = ready_tx.send(Err("hook thread panicked".to_string()));
+                let _ = ready_tx.send(HookReady {
+                    thread_id: None,
+                    result: Err("hook thread panicked".to_string()),
+                });
             }
         });
 
-        match ready_rx.recv().map_err(|error| error.to_string())? {
+        let ready = ready_rx.recv().map_err(|error| error.to_string())?;
+        match ready.result {
             Ok(()) => {
                 tracing::info!("keyboard hook started");
                 Ok((
                     HookHandle {
                         join_handle: Some(join_handle),
+                        thread_id: ready.thread_id,
                     },
                     consumer,
                 ))
@@ -65,6 +89,18 @@ impl Hook {
 
 impl Drop for HookHandle {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        if let Some(thread_id) = self.thread_id {
+            unsafe {
+                use windows::Win32::{
+                    Foundation::{LPARAM, WPARAM},
+                    UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT},
+                };
+
+                let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
         }
@@ -72,7 +108,10 @@ impl Drop for HookHandle {
 }
 
 #[cfg(windows)]
-fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
+fn run_hook_thread(
+    producer: &mut HookProducer,
+    signal_ready: impl FnOnce(Result<(), String>),
+) -> windows::core::Result<()> {
     use std::sync::atomic::{AtomicPtr, Ordering};
 
     use windows::Win32::{
@@ -91,6 +130,7 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
     };
 
     static HOOK_PRODUCER: AtomicPtr<HookProducer> = AtomicPtr::new(ptr::null_mut());
+    const LLKHF_INJECTED_FLAG: u32 = 0x10;
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 {
@@ -98,6 +138,11 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
             if message == WM_KEYDOWN || message == WM_SYSKEYDOWN {
                 // SAFETY: lparam is provided by the OS for WH_KEYBOARD_LL callbacks.
                 let keyboard = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
+                if crate::inject::SUSPEND.load(Ordering::Relaxed)
+                    && (keyboard.flags.0 & LLKHF_INJECTED_FLAG) != 0
+                {
+                    return unsafe { CallNextHookEx(HHOOK::default(), code, wparam, lparam) };
+                }
                 let producer_ptr = HOOK_PRODUCER.load(Ordering::Relaxed);
                 if !producer_ptr.is_null() {
                     // SAFETY: callback thread stores a valid HookProducer pointer before hook install and clears it on teardown.
@@ -153,8 +198,18 @@ fn run_hook_thread(producer: &mut HookProducer) -> windows::core::Result<()> {
     HOOK_PRODUCER.store(producer as *mut HookProducer, Ordering::Relaxed);
 
     // SAFETY: installing a WH_KEYBOARD_LL hook with a static callback is required to receive events.
-    let hook =
-        unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), HINSTANCE::default(), 0)? };
+    let hook = match unsafe {
+        SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), HINSTANCE::default(), 0)
+    } {
+        Ok(hook) => {
+            signal_ready(Ok(()));
+            hook
+        }
+        Err(error) => {
+            signal_ready(Err(error.to_string()));
+            return Err(error);
+        }
+    };
 
     let mut message = MSG::default();
     // SAFETY: standard message pump for the hook thread.

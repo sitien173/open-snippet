@@ -212,6 +212,7 @@ pub fn run() {
             let watcher = crate::store::watch_root(snippets_root).map_err(|error| setup_error(error.to_string()))?;
             let mut rx = watcher.subscribe();
             let sync_rx = watcher.subscribe();
+            let engine_rx = watcher.subscribe();
             let snapshot_handle = snippet_state.snapshot_handle();
             tauri::async_runtime::spawn(async move {
                 while rx.changed().await.is_ok() {
@@ -224,11 +225,20 @@ pub fn run() {
             });
             snippet_state.set_watcher(watcher);
             let prefs_state = crate::commands::prefs::load_prefs_state().map_err(setup_error)?;
+            let prefs_handle = prefs_state.prefs_handle();
             notify_if_recovered_from_crash(app.handle(), &prefs_state).map_err(setup_error)?;
             let form_runner = Arc::new(crate::form::FormRunner::new(app.handle().clone()));
+            let runtime_form_runner = Arc::clone(&form_runner);
             let sync_state =
                 crate::commands::sync::SyncCommandState::new(crate::commands::sync::sync_root().map_err(setup_error)?);
             let sync_driver = crate::sync::spawn_driver(sync_state.backend(), sync_rx);
+            let engine_handle = crate::engine::start_runtime(
+                engine_rx,
+                prefs_handle,
+                runtime_form_runner,
+                app.handle().clone(),
+            )
+            .map_err(setup_error)?;
             app.manage(snippet_state);
             app.manage(prefs_state);
             app.manage(logging_config);
@@ -236,7 +246,6 @@ pub fn run() {
             app.manage(form_runner);
             app.manage(sync_state);
             app.manage(sync_driver);
-            let engine_handle = crate::engine::start_runtime();
             app.manage(engine_handle);
             build_tray(app.handle())?;
             Ok(())

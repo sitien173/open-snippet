@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::RwLock};
+use std::{fs, path::PathBuf, sync::{Arc, RwLock}};
 
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -29,19 +29,23 @@ impl Default for Prefs {
 
 pub struct PrefsState {
     path: PathBuf,
-    prefs: RwLock<Prefs>,
+    prefs: Arc<RwLock<Prefs>>,
 }
 
 impl PrefsState {
     pub fn new(path: PathBuf, prefs: Prefs) -> Self {
         Self {
             path,
-            prefs: RwLock::new(prefs),
+            prefs: Arc::new(RwLock::new(prefs)),
         }
     }
 
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    pub fn prefs_handle(&self) -> Arc<RwLock<Prefs>> {
+        Arc::clone(&self.prefs)
     }
 }
 

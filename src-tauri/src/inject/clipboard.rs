@@ -112,23 +112,11 @@ impl ClipboardBackend for SystemClipboardBackend {
     ) -> Result<(), InjectError> {
         #[cfg(windows)]
         {
-            // SECURITY: clipboard payload is user content; log redacted text only.
-            tracing::debug!(
-                text = %crate::log_init::redact::redact_str(
-                    text,
-                    crate::log_init::redact::FieldKind::ClipboardText
-                ),
-                chars = text.chars().count(),
-                "system clipboard paste"
-            );
-            let snapshot = capture_clipboard()?;
-            let _guard = ClipboardGuard::open(timeout)?;
-            clear_clipboard()?;
-            set_clipboard_text_internal(text)?;
-            sink.send(KeyboardAction::Paste(text.to_string()));
-            thread::sleep(Duration::from_millis(10));
-            restore_clipboard(&snapshot)?;
-            Ok(())
+            let _ = (sink, text, timeout);
+            tracing::warn!("system clipboard paste path disabled; using unicode fallback");
+            Err(InjectError::new(
+                "system clipboard paste path disabled",
+            ))
         }
 
         #[cfg(not(windows))]

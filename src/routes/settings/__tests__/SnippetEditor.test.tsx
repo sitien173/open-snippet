@@ -163,4 +163,31 @@ describe("SnippetEditor", () => {
       expect(onSave).toHaveBeenCalled();
     });
   });
+
+  test("new snippets save into the runtime default snippet file", async () => {
+    const mockInvoke = vi.fn().mockResolvedValue(null);
+    window.__OPENMACRO_MOCK_INVOKE = mockInvoke;
+
+    render(<SnippetEditor allSnippets={otherSnippets} />);
+
+    const triggerInput = screen.getByLabelText(/trigger/i);
+    const replaceInput = screen.getByLabelText(/replacement/i);
+    const saveButton = screen.getByRole("button", { name: /save snippet/i });
+
+    fireEvent.change(triggerInput, { target: { value: "brand-new" } });
+    fireEvent.change(replaceInput, { target: { value: "New text" } });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_snippet", expect.objectContaining({
+        payload: expect.objectContaining({
+          source_file: "F:/projects_new/textblaze/snippets/default.yaml",
+          original_trigger: null,
+          trigger: "brand-new",
+          replace: "New text",
+        })
+      }));
+      expect(mockInvoke).toHaveBeenCalledWith("reload_snippets");
+    });
+  });
 });

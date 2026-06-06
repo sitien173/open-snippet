@@ -5,6 +5,7 @@ pub mod sendinput;
 
 use std::{
     sync::atomic::{AtomicBool, Ordering},
+    thread,
     time::Duration,
 };
 
@@ -12,6 +13,8 @@ use clipboard::{ClipboardBackend, MockClipboardBackend, SystemClipboardBackend};
 use sendinput::WindowsKeyboardSink;
 
 pub static SUSPEND: AtomicBool = AtomicBool::new(false);
+const PRE_INJECT_DELAY: Duration = Duration::from_millis(20);
+const POST_BACKSPACE_DELAY: Duration = Duration::from_millis(12);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyboardAction {
@@ -106,10 +109,14 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
             "injecting text"
         );
         SUSPEND.store(true, Ordering::Relaxed);
+        // Let the target application commit the final typed character before we erase the trigger.
+        thread::sleep(PRE_INJECT_DELAY);
 
         for _ in 0..plan.backspaces {
             self.sink.send(KeyboardAction::Backspace);
         }
+        // Give the target app a beat to apply the erase sequence before typing replacement text.
+        thread::sleep(POST_BACKSPACE_DELAY);
 
         let paste_result = if plan.text.len() <= plan.max_clipboard_bytes {
             self.clipboard

@@ -25,7 +25,11 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
     setError(null);
   }, [snippet]);
 
-  const sourceFile = snippet?.source_file || "F:/projects_new/textblaze/snippets/default.yaml";
+  const sourceFile =
+    snippet?.source_file ||
+    allSnippets.find((entry) => entry.file_relative === "default.yaml" || entry.file_relative.endsWith("/default.yaml"))?.source_file ||
+    allSnippets[0]?.source_file ||
+    "";
 
   const isTriggerEmpty = !trigger.trim();
   const isTriggerTooLong = trigger.length > 32;
@@ -36,7 +40,8 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
       s.id !== snippet?.id
   );
 
-  const isSaveDisabled = isTriggerEmpty || isTriggerTooLong || hasCollision || isSaving;
+  const isSourceFileMissing = !sourceFile;
+  const isSaveDisabled = isTriggerEmpty || isTriggerTooLong || hasCollision || isSourceFileMissing || isSaving;
 
   let validationError = "";
   if (isTriggerEmpty) {
@@ -45,6 +50,8 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
     validationError = "Trigger cannot exceed 32 characters";
   } else if (hasCollision) {
     validationError = "Trigger collision with an existing snippet";
+  } else if (isSourceFileMissing) {
+    validationError = "No snippet file is available";
   }
 
   const handleSave = async (e: React.FormEvent) => {

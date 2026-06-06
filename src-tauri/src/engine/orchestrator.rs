@@ -6,6 +6,8 @@ use std::{
     sync::{Mutex, RwLock},
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use crate::{
@@ -15,22 +17,94 @@ use crate::{
         ResolveError, ResolveNotifySink, Resolver,
     },
     form::{restore_on_submit, FocusBackend, FormOutcome, FormRunner, NoopFocusBackend, NoopWindowSink},
-    hook::{HookEvent, ResetCause},
+    hook::{Hook, HookEvent, ResetCause},
     inject::{InjectError, InjectPlan, Injector, KeyboardSink, SUSPEND},
     matcher::{MatchBuffer, Matcher, Reset},
     store::{Snippet, VarKind},
 };
 use futures_util::FutureExt;
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
 pub static PAUSED: AtomicBool = AtomicBool::new(false);
 const DEFAULT_MAX_EXPANSION_LEN: usize = 32_768;
 
-pub struct EngineHandle;
+pub struct EngineHandle {
+    running: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    _hook: Option<crate::hook::HookHandle>,
+    _runtime: Option<tokio::runtime::Runtime>,
+}
 
-pub fn start_runtime() -> EngineHandle {
-    EngineHandle
+pub fn start_runtime<R: Runtime>(
+    mut snippet_rx: tokio::sync::watch::Receiver<Arc<crate::store::SnapshotInner>>,
+    prefs: Arc<RwLock<Prefs>>,
+    form_runner: Arc<FormRunner>,
+    app: AppHandle<R>,
+) -> Result<EngineHandle, String> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let runtime_handle = runtime.handle().clone();
+    let focus: Arc<dyn FocusBackend> = Arc::new(crate::form::SystemFocusBackend);
+    let shell_backend: Arc<dyn crate::expand::shell::ShellBackend> =
+        Arc::new(crate::expand::shell::TokioShellBackend);
+    let (hook_handle, mut consumer) = Hook::start()?;
+    let running = Arc::new(AtomicBool::new(true));
+    let worker_running = Arc::clone(&running);
+    let worker_prefs = Arc::clone(&prefs);
+    let worker_form_runner = Arc::clone(&form_runner);
+    let worker_focus = Arc::clone(&focus);
+    let worker_shell_backend = Arc::clone(&shell_backend);
+    let worker_app = app.clone();
+
+    let worker = thread::spawn(move || {
+        let mut orchestrator = build_orchestrator(
+            snippet_rx.borrow().snippets.clone(),
+            Arc::clone(&worker_prefs),
+            Arc::clone(&worker_form_runner),
+            Arc::clone(&worker_focus),
+            Arc::clone(&worker_shell_backend),
+            worker_app.clone(),
+            runtime_handle.clone(),
+        );
+
+        while worker_running.load(Ordering::Relaxed) {
+            if snippet_rx.has_changed().unwrap_or(false) {
+                let snapshot = snippet_rx.borrow_and_update().clone();
+                tracing::info!(loaded = snapshot.snippets.len(), errors = snapshot.errors.len(), "rebuilding runtime matcher");
+                orchestrator = build_orchestrator(
+                    snapshot.snippets.clone(),
+                    Arc::clone(&worker_prefs),
+                    Arc::clone(&worker_form_runner),
+                    Arc::clone(&worker_focus),
+                    Arc::clone(&worker_shell_backend),
+                    worker_app.clone(),
+                    runtime_handle.clone(),
+                );
+            }
+
+            let max_expansion_len = worker_prefs.read().unwrap().max_expansion_len;
+            orchestrator.set_max_expansion_len(max_expansion_len);
+
+            if let Some(event) = consumer.pop() {
+                if let Err(error) = orchestrator.handle_event(event) {
+                    tracing::warn!(error = %error, "runtime input handling failed");
+                }
+                continue;
+            }
+
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+
+    Ok(EngineHandle {
+        running,
+        worker: Some(worker),
+        _hook: Some(hook_handle),
+        _runtime: Some(runtime),
+    })
 }
 
 pub fn is_paused() -> bool {
@@ -99,6 +173,44 @@ impl<R: tauri::Runtime> ResolveNotifySink for AppHandle<R> {
 
     fn confirm_shell(&self, _snippet_id: &str, _name: &str, _args: &[String]) -> bool {
         false
+    }
+}
+
+fn build_orchestrator<R: Runtime>(
+    snippets: Vec<Snippet>,
+    prefs: Arc<RwLock<Prefs>>,
+    form_runner: Arc<FormRunner>,
+    focus: Arc<dyn FocusBackend>,
+    shell_backend: Arc<dyn crate::expand::shell::ShellBackend>,
+    notifier: AppHandle<R>,
+    runtime: tokio::runtime::Handle,
+) -> Orchestrator<
+    crate::inject::sendinput::WindowsKeyboardSink,
+    crate::inject::clipboard::SystemClipboardBackend,
+    AppHandle<R>,
+> {
+    let mut orchestrator = Orchestrator::new_with_state(
+        snippets,
+        Injector::new(),
+        notifier,
+        runtime,
+        form_runner,
+        focus,
+        prefs.clone(),
+        shell_backend,
+    );
+    let max_expansion_len = prefs.read().unwrap().max_expansion_len;
+    orchestrator.set_max_expansion_len(max_expansion_len);
+    orchestrator
+}
+
+impl Drop for EngineHandle {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        let _ = self._hook.take();
     }
 }
 
