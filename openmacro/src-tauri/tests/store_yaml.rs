@@ -61,10 +61,10 @@ snippets:
     assert_eq!(result.errors.len(), 1);
     assert!(
         result.errors[0]
-            .message
+            .message()
             .contains("version"),
         "{}",
-        result.errors[0].message
+        result.errors[0].message()
     );
 }
 
@@ -88,10 +88,10 @@ snippets:
     assert_eq!(result.errors.len(), 1);
     assert!(
         result.errors[0]
-            .message
+            .message()
             .contains("version"),
         "{}",
-        result.errors[0].message
+        result.errors[0].message()
     );
 }
 
@@ -124,7 +124,7 @@ snippets:
     assert_eq!(result.snippets.len(), 1);
     assert_eq!(result.snippets[0].trigger, ";sig");
     assert_eq!(result.errors.len(), 1);
-    assert_eq!(result.errors[0].path, root.path().join("broken.yaml"));
+    assert_eq!(result.errors[0].path(), root.path().join("broken.yaml"));
 }
 
 #[test]
@@ -216,9 +216,9 @@ snippets:
     assert_eq!(result.errors.len(), 1);
     assert!(
         result.errors[0]
-            .message
+            .message()
             .contains("duplicate"),
         "{}",
-        result.errors[0].message
+        result.errors[0].message()
     );
 }

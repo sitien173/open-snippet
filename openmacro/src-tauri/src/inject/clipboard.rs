@@ -2,6 +2,8 @@
 
 use std::{thread, time::Duration};
 
+use crate::expand::ClipboardReader;
+
 use super::{InjectError, KeyboardAction, KeyboardSink};
 
 const CF_TEXT_FORMAT: u32 = 1;
@@ -35,7 +37,7 @@ impl ClipboardSnapshot {
     }
 }
 
-pub trait ClipboardBackend {
+pub trait ClipboardBackend: ClipboardReader {
     fn paste(
         &mut self,
         sink: &mut dyn KeyboardSink,
@@ -45,6 +47,12 @@ pub trait ClipboardBackend {
 }
 
 pub struct MockClipboardBackend;
+
+impl ClipboardReader for MockClipboardBackend {
+    fn read_text(&mut self) -> Option<String> {
+        None
+    }
+}
 
 impl ClipboardBackend for MockClipboardBackend {
     fn paste(
@@ -59,6 +67,20 @@ impl ClipboardBackend for MockClipboardBackend {
 }
 
 pub struct SystemClipboardBackend;
+
+impl ClipboardReader for SystemClipboardBackend {
+    fn read_text(&mut self) -> Option<String> {
+        #[cfg(windows)]
+        {
+            capture_clipboard().ok()?.text_content()
+        }
+
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+}
 
 impl ClipboardBackend for SystemClipboardBackend {
     fn paste(
@@ -84,6 +106,37 @@ impl ClipboardBackend for SystemClipboardBackend {
             let _ = (sink, text, timeout);
             Err(InjectError::new("clipboard paste unsupported on this platform"))
         }
+    }
+}
+
+#[derive(Default)]
+pub struct TestClipboardBackend {
+    text: Option<String>,
+}
+
+impl TestClipboardBackend {
+    pub fn with_text(text: impl Into<String>) -> Self {
+        Self {
+            text: Some(text.into()),
+        }
+    }
+}
+
+impl ClipboardReader for TestClipboardBackend {
+    fn read_text(&mut self) -> Option<String> {
+        self.text.clone()
+    }
+}
+
+impl ClipboardBackend for TestClipboardBackend {
+    fn paste(
+        &mut self,
+        sink: &mut dyn KeyboardSink,
+        text: &str,
+        _timeout: Duration,
+    ) -> Result<(), InjectError> {
+        sink.send(KeyboardAction::Paste(text.to_string()));
+        Ok(())
     }
 }
 

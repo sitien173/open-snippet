@@ -23,7 +23,7 @@ impl KeyboardSink for WindowsKeyboardSink {
 fn send_windows_action(action: KeyboardAction) {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VK_BACK, VK_CONTROL, VIRTUAL_KEY,
+        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VK_BACK, VK_CONTROL, VK_LEFT, VIRTUAL_KEY,
     };
 
     fn send_inputs(inputs: &mut [INPUT]) {
@@ -50,6 +50,30 @@ fn send_windows_action(action: KeyboardAction) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_BACK.0),
+                            dwFlags: KEYEVENTF_KEYUP,
+                            ..Default::default()
+                        },
+                    },
+                },
+            ];
+            send_inputs(&mut inputs);
+        }
+        KeyboardAction::LeftArrow => {
+            let mut inputs = [
+                INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: VIRTUAL_KEY(VK_LEFT.0),
+                            ..Default::default()
+                        },
+                    },
+                },
+                INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: VIRTUAL_KEY(VK_LEFT.0),
                             dwFlags: KEYEVENTF_KEYUP,
                             ..Default::default()
                         },

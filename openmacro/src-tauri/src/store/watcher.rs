@@ -117,7 +117,7 @@ fn load_snapshot(root: &std::path::Path, revision: u64) -> SnapshotInner {
         Err(error) => SnapshotInner {
             revision,
             snippets: Vec::new(),
-            errors: vec![LoadError {
+            errors: vec![LoadError::Io {
                 path: root.to_path_buf(),
                 message: io_error_message(error),
             }],

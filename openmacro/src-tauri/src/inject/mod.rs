@@ -16,6 +16,7 @@ pub static SUSPEND: AtomicBool = AtomicBool::new(false);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyboardAction {
     Backspace,
+    LeftArrow,
     Unicode(char),
     Paste(String),
 }
@@ -28,6 +29,7 @@ pub trait KeyboardSink {
 pub struct InjectPlan {
     pub backspaces: usize,
     pub text: String,
+    pub caret_left: usize,
     pub max_clipboard_bytes: usize,
     pub clipboard_timeout: Duration,
 }
@@ -83,8 +85,16 @@ impl<S: KeyboardSink> Injector<S, MockClipboardBackend> {
 }
 
 impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
+    pub fn new_with_parts(sink: S, clipboard: B) -> Self {
+        Self { sink, clipboard }
+    }
+
     pub fn sink(&self) -> &S {
         &self.sink
+    }
+
+    pub fn clipboard_mut(&mut self) -> &mut B {
+        &mut self.clipboard
     }
 
     pub fn inject(&mut self, plan: InjectPlan) -> Result<(), InjectError> {
@@ -105,6 +115,10 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
             for ch in plan.text.chars() {
                 self.sink.send(KeyboardAction::Unicode(ch));
             }
+        }
+
+        for _ in 0..plan.caret_left {
+            self.sink.send(KeyboardAction::LeftArrow);
         }
 
         SUSPEND.store(false, Ordering::Relaxed);
@@ -137,6 +151,7 @@ mod tests {
             .inject(InjectPlan {
                 backspaces: 3,
                 text: "ok".to_string(),
+                caret_left: 2,
                 max_clipboard_bytes: 4_096,
                 clipboard_timeout: Duration::from_millis(50),
             })
@@ -150,6 +165,8 @@ mod tests {
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
                 KeyboardAction::Paste("ok".to_string()),
+                KeyboardAction::LeftArrow,
+                KeyboardAction::LeftArrow,
             ]
         );
     }

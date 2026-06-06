@@ -8,6 +8,8 @@ use std::{
 
 use serde::Deserialize;
 
+use crate::expand::{strip_cursor_token, CursorTokenError};
+
 use super::{Snippet, VarDecl};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,9 +19,43 @@ pub struct LoadResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoadError {
-    pub path: PathBuf,
-    pub message: String,
+pub enum LoadError {
+    Io { path: PathBuf, message: String },
+    Parse { path: PathBuf, message: String },
+    MissingVersion { path: PathBuf },
+    UnsupportedVersion { path: PathBuf, version: u32 },
+    RelativePath { path: PathBuf },
+    DuplicateTrigger { path: PathBuf, trigger: String },
+    TooManyCursorTokens { path: PathBuf, trigger: String },
+}
+
+impl LoadError {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Io { path, .. }
+            | Self::Parse { path, .. }
+            | Self::MissingVersion { path }
+            | Self::UnsupportedVersion { path, .. }
+            | Self::RelativePath { path }
+            | Self::DuplicateTrigger { path, .. }
+            | Self::TooManyCursorTokens { path, .. } => path,
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            Self::Io { message, .. } | Self::Parse { message, .. } => message.clone(),
+            Self::MissingVersion { .. } => "missing required version: 1".to_string(),
+            Self::UnsupportedVersion { version, .. } => format!("unsupported version: {version}"),
+            Self::RelativePath { .. } => "failed to derive relative path".to_string(),
+            Self::DuplicateTrigger { trigger, .. } => {
+                format!("duplicate trigger in file: {trigger}")
+            }
+            Self::TooManyCursorTokens { trigger, .. } => {
+                format!("too many cursor tokens in snippet: {trigger}")
+            }
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,31 +112,31 @@ fn is_yaml_file(path: &Path) -> bool {
 }
 
 fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
-    let contents = fs::read_to_string(path).map_err(|error| LoadError {
+    let contents = fs::read_to_string(path).map_err(|error| LoadError::Io {
         path: path.to_path_buf(),
         message: error.to_string(),
     })?;
 
-    let document: RootDocument = serde_yaml::from_str(&contents).map_err(|error| LoadError {
+    let document: RootDocument = serde_yaml::from_str(&contents).map_err(|error| LoadError::Parse {
         path: path.to_path_buf(),
         message: error.to_string(),
     })?;
 
-    let version = document.version.ok_or_else(|| LoadError {
-        path: path.to_path_buf(),
-        message: "missing required version: 1".to_string(),
-    })?;
+    let version = document
+        .version
+        .ok_or_else(|| LoadError::MissingVersion {
+            path: path.to_path_buf(),
+        })?;
 
     if version != 1 {
-        return Err(LoadError {
+        return Err(LoadError::UnsupportedVersion {
             path: path.to_path_buf(),
-            message: format!("unsupported version: {version}"),
+            version,
         });
     }
 
-    let relative_path = path.strip_prefix(root).map_err(|_| LoadError {
+    let relative_path = path.strip_prefix(root).map_err(|_| LoadError::RelativePath {
         path: path.to_path_buf(),
-        message: "failed to derive relative path".to_string(),
     })?;
     let relative_path = normalize_relative_path(relative_path);
 
@@ -108,11 +144,12 @@ fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
     let mut snippets = Vec::with_capacity(document.snippets.len());
     for snippet in document.snippets {
         if !seen_triggers.insert(snippet.trigger.clone()) {
-            return Err(LoadError {
+            return Err(LoadError::DuplicateTrigger {
                 path: path.to_path_buf(),
-                message: format!("duplicate trigger in file: {}", snippet.trigger),
+                trigger: snippet.trigger,
             });
         }
+        validate_snippet(path, &snippet)?;
 
         snippets.push(Snippet {
             id: format!("{relative_path}::{}", snippet.trigger),
@@ -124,6 +161,16 @@ fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
     }
 
     Ok(snippets)
+}
+
+fn validate_snippet(path: &Path, snippet: &SnippetDocument) -> Result<(), LoadError> {
+    match strip_cursor_token(&snippet.replace) {
+        Ok(_) => Ok(()),
+        Err(CursorTokenError::TooManyTokens) => Err(LoadError::TooManyCursorTokens {
+            path: path.to_path_buf(),
+            trigger: snippet.trigger.clone(),
+        }),
+    }
 }
 
 fn normalize_relative_path(path: &Path) -> String {

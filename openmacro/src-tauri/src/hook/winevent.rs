@@ -59,6 +59,24 @@ pub mod testing {
 }
 
 #[cfg(test)]
+pub(crate) mod test_sync {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    use super::DENYLISTED;
+
+    pub(crate) fn global_state_guard() -> MutexGuard<'static, ()> {
+        let guard = GLOBAL_STATE_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        DENYLISTED.store(false, std::sync::atomic::Ordering::Relaxed);
+        guard
+    }
+
+    static GLOBAL_STATE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+}
+
+#[cfg(test)]
 mod tests {
     use crate::{
         hook::{winevent::testing, ResetCause},
@@ -67,6 +85,7 @@ mod tests {
 
     #[test]
     fn foreground_change_to_denylisted_process_clears_buffer_and_sets_gate() {
+        let _guard = super::test_sync::global_state_guard();
         let mut buffer = MatchBuffer::new(64);
         buffer.push_char(';');
         buffer.push_char('s');
@@ -80,6 +99,7 @@ mod tests {
 
     #[test]
     fn non_denylisted_foreground_change_clears_buffer_without_gate() {
+        let _guard = super::test_sync::global_state_guard();
         let mut buffer = MatchBuffer::new(64);
         buffer.push_char(';');
         buffer.push_char('x');
