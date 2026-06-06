@@ -1,6 +1,12 @@
 //! SendInput keyboard sink.
 
+#[cfg(windows)]
+use std::{thread, time::Duration};
+
 use super::{KeyboardAction, KeyboardSink};
+
+#[cfg(windows)]
+const PASTE_STEP_DELAY: Duration = Duration::from_millis(10);
 
 #[derive(Default)]
 pub struct WindowsKeyboardSink;
@@ -44,6 +50,12 @@ fn send_windows_action(action: KeyboardAction) {
             // SAFETY: buffer is stack-local and valid for the duration of the SendInput call.
             let _ = SendInput(inputs, std::mem::size_of::<INPUT>() as i32);
         }
+    }
+
+    fn send_input(input: INPUT) {
+        let mut inputs = [input];
+        send_inputs(&mut inputs);
+        thread::sleep(PASTE_STEP_DELAY);
     }
 
     match action {
@@ -124,47 +136,44 @@ fn send_windows_action(action: KeyboardAction) {
             }
         }
         KeyboardAction::Paste(_) => {
-            let mut inputs = [
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(VK_CONTROL.0),
-                            ..Default::default()
-                        },
+            send_input(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(VK_CONTROL.0),
+                        ..Default::default()
                     },
                 },
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(b'V' as u16),
-                            ..Default::default()
-                        },
+            });
+            send_input(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(b'V' as u16),
+                        ..Default::default()
                     },
                 },
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(b'V' as u16),
-                            dwFlags: KEYEVENTF_KEYUP,
-                            ..Default::default()
-                        },
+            });
+            send_input(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(b'V' as u16),
+                        dwFlags: KEYEVENTF_KEYUP,
+                        ..Default::default()
                     },
                 },
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(VK_CONTROL.0),
-                            dwFlags: KEYEVENTF_KEYUP,
-                            ..Default::default()
-                        },
+            });
+            send_input(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(VK_CONTROL.0),
+                        dwFlags: KEYEVENTF_KEYUP,
+                        ..Default::default()
                     },
                 },
-            ];
-            send_inputs(&mut inputs);
+            });
         }
     }
 }

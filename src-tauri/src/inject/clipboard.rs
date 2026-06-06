@@ -8,6 +8,8 @@ use super::{InjectError, KeyboardAction, KeyboardSink};
 
 const CF_TEXT_FORMAT: u32 = 1;
 const CF_UNICODETEXT_FORMAT: u32 = 13;
+#[cfg(windows)]
+const POST_PASTE_RESTORE_DELAY: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone)]
 pub struct ClipboardFormat {
@@ -112,11 +114,23 @@ impl ClipboardBackend for SystemClipboardBackend {
     ) -> Result<(), InjectError> {
         #[cfg(windows)]
         {
-            let _ = (sink, text, timeout);
-            tracing::warn!("system clipboard paste path disabled; using unicode fallback");
-            Err(InjectError::new(
-                "system clipboard paste path disabled",
-            ))
+            // SECURITY: clipboard payload is user content; log redacted text only.
+            tracing::debug!(
+                text = %crate::log_init::redact::redact_str(
+                    text,
+                    crate::log_init::redact::FieldKind::ClipboardText
+                ),
+                chars = text.chars().count(),
+                "system clipboard paste"
+            );
+            let snapshot = capture_clipboard()?;
+            let _guard = ClipboardGuard::open(timeout)?;
+            clear_clipboard()?;
+            set_clipboard_text_internal(text)?;
+            sink.send(KeyboardAction::Paste(text.to_string()));
+            thread::sleep(POST_PASTE_RESTORE_DELAY);
+            restore_clipboard(&snapshot)?;
+            Ok(())
         }
 
         #[cfg(not(windows))]

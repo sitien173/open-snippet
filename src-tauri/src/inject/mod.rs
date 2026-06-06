@@ -15,6 +15,7 @@ use sendinput::WindowsKeyboardSink;
 pub static SUSPEND: AtomicBool = AtomicBool::new(false);
 const PRE_INJECT_DELAY: Duration = Duration::from_millis(20);
 const POST_BACKSPACE_DELAY: Duration = Duration::from_millis(12);
+const UNICODE_DIRECT_THRESHOLD_CHARS: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyboardAction {
@@ -102,6 +103,7 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
 
     #[tracing::instrument(skip(self, plan), fields(backspaces = plan.backspaces, caret_left = plan.caret_left, text_chars = plan.text.chars().count()))]
     pub fn inject(&mut self, plan: InjectPlan) -> Result<(), InjectError> {
+        let text_chars = plan.text.chars().count();
         // SECURITY: injected text is snippet output/user content; log only redacted body plus counts.
         tracing::debug!(
             text = %crate::log_body!(&plan.text),
@@ -118,9 +120,11 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
         // Give the target app a beat to apply the erase sequence before typing replacement text.
         thread::sleep(POST_BACKSPACE_DELAY);
 
-        let paste_result = if plan.text.len() <= plan.max_clipboard_bytes {
-            self.clipboard
-                .paste(&mut self.sink, &plan.text, plan.clipboard_timeout)
+        let paste_result = if text_chars <= UNICODE_DIRECT_THRESHOLD_CHARS {
+            tracing::debug!(text_chars, "using direct unicode injection for short replacement");
+            Err(InjectError::new("short replacement uses unicode path"))
+        } else if plan.text.len() <= plan.max_clipboard_bytes {
+            self.clipboard.paste(&mut self.sink, &plan.text, plan.clipboard_timeout)
         } else {
             Err(InjectError::new("clipboard paste bypassed by size cap"))
         };
