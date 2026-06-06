@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { Snippet, listSnippets } from "../../lib/snippets";
 import { SnippetList } from "./SnippetList";
 import { SnippetEditor } from "./SnippetEditor";
@@ -97,6 +98,26 @@ export function Settings() {
             <I.RefreshCw />
             Sync & Diagnostics
           </button>
+          <Link
+            to="/logs"
+            className="nav-item"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              textDecoration: "none",
+              marginTop: "12px",
+              borderTop: "1px solid var(--color-border-subdued)",
+              paddingTop: "12px",
+              color: "var(--color-text-subdued)",
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" style={{ width: "18px", height: "18px" }}>
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            System Logs
+          </Link>
         </nav>
       </aside>
 
