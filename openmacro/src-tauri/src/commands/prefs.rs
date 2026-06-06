@@ -15,6 +15,8 @@ pub struct Prefs {
     pub autostart: bool,
     pub max_expansion_len: usize,
     pub shell_consent: bool,
+    #[serde(default)]
+    pub last_crash_check: Option<u64>,
 }
 
 impl Default for Prefs {
@@ -24,6 +26,7 @@ impl Default for Prefs {
             autostart: false,
             max_expansion_len: 32_768,
             shell_consent: false,
+            last_crash_check: None,
         }
     }
 }

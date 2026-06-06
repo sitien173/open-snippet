@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: openmacro
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: openmacro/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cargo test
+        run: cargo test --all-features -- --test-threads=1
+        working-directory: openmacro/src-tauri
+
+      - name: Cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: openmacro/src-tauri
+
+      - name: Frontend test
+        run: pnpm test
+
+      - name: Frontend lint
+        run: pnpm lint

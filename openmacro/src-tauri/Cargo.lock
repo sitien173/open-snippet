@@ -2580,6 +2580,7 @@ dependencies = [
  "aho-corasick",
  "chrono",
  "dirs 5.0.1",
+ "futures-util",
  "git2",
  "notify",
  "rtrb",

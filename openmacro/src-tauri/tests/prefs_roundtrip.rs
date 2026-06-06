@@ -30,6 +30,7 @@ fn prefs_round_trip_persists_across_reads() {
         autostart: true,
         max_expansion_len: 2048,
         shell_consent: true,
+        last_crash_check: Some(123),
     };
 
     set_prefs_inner(&state, prefs.clone()).unwrap();

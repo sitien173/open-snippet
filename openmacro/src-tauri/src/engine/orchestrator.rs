@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    panic::AssertUnwindSafe,
     sync::{Mutex, RwLock},
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
@@ -19,6 +20,7 @@ use crate::{
     matcher::{MatchBuffer, Matcher, Reset},
     store::{Snippet, VarKind},
 };
+use futures_util::FutureExt;
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 
@@ -212,39 +214,50 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
                     let max_expansion_len = self.max_expansion_len;
                     let notifier = Arc::new(NoopNotifySink);
                     self.runtime.spawn(async move {
-                        let outcome = form_runner.run(&snippet, hwnd).await;
-                        let Ok(outcome) = outcome else {
-                            return;
-                        };
-                        let FormOutcome::Submitted(values) = &outcome else {
-                            return;
-                        };
+                        let result = AssertUnwindSafe(async move {
+                            let outcome = form_runner.run(&snippet, hwnd).await;
+                            let Ok(outcome) = outcome else {
+                                return;
+                            };
+                            let FormOutcome::Submitted(values) = &outcome else {
+                                return;
+                            };
 
-                        let mut clipboard = injector.lock().unwrap();
-                        let prefs = prefs.read().unwrap().clone();
-                        let resolver = Resolver::new(&prefs)
-                            .with_notify_sink(notifier.as_ref())
-                            .with_shell_backend(shell_backend.as_ref());
-                        let Ok(resolved) = resolver.resolve(
-                            &snippet,
-                            clipboard.clipboard_mut(),
-                            Some(values),
-                        ) else {
-                            return;
-                        };
-                        if resolved.text.chars().count() > max_expansion_len {
-                            return;
+                            let mut clipboard = injector.lock().unwrap();
+                            let prefs = prefs.read().unwrap().clone();
+                            let resolver = Resolver::new(&prefs)
+                                .with_notify_sink(notifier.as_ref())
+                                .with_shell_backend(shell_backend.as_ref());
+                            let Ok(resolved) = resolver.resolve(
+                                &snippet,
+                                clipboard.clipboard_mut(),
+                                Some(values),
+                            ) else {
+                                return;
+                            };
+                            if resolved.text.chars().count() > max_expansion_len {
+                                return;
+                            }
+                            if restore_on_submit(focus.as_ref(), hwnd, &outcome).is_err() {
+                                return;
+                            }
+                            let _ = clipboard.inject(InjectPlan {
+                                backspaces: hit.trigger_len_chars,
+                                text: resolved.text,
+                                caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
+                                max_clipboard_bytes: 4_096,
+                                clipboard_timeout: std::time::Duration::from_millis(50),
+                            });
+                        })
+                        .catch_unwind()
+                        .await;
+
+                        if let Err(payload) = result {
+                            let _ = crate::crash::write_caught_panic_dump(
+                                "form runner background task",
+                                payload.as_ref(),
+                            );
                         }
-                        if restore_on_submit(focus.as_ref(), hwnd, &outcome).is_err() {
-                            return;
-                        }
-                        let _ = clipboard.inject(InjectPlan {
-                            backspaces: hit.trigger_len_chars,
-                            text: resolved.text,
-                            caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
-                            max_clipboard_bytes: 4_096,
-                            clipboard_timeout: std::time::Duration::from_millis(50),
-                        });
                     });
                     return Ok(true);
                 }

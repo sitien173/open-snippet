@@ -5,8 +5,12 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, Runtime, WindowEvent,
 };
+use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
+const DEFAULT_SNIPPETS_YAML: &str = include_str!("../../snippets/default.yaml");
+
+pub mod crash;
 pub mod engine;
 pub mod expand;
 pub mod form;
@@ -50,6 +54,45 @@ fn open_snippets_folder<R: Runtime>(app: &AppHandle<R>) {
             .opener()
             .open_path(snippets_dir.to_string_lossy().into_owned(), None::<String>);
     }
+}
+
+fn seed_default_snippets_if_empty(root: &std::path::Path) -> Result<(), String> {
+    let has_existing_files = fs::read_dir(root)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .any(|entry| entry.path().is_file());
+    if has_existing_files {
+        return Ok(());
+    }
+
+    fs::write(root.join("default.yaml"), DEFAULT_SNIPPETS_YAML).map_err(|error| error.to_string())
+}
+
+fn notify_if_recovered_from_crash<R: Runtime>(
+    app: &AppHandle<R>,
+    prefs_state: &crate::commands::prefs::PrefsState,
+) -> Result<(), String> {
+    let mut prefs = crate::commands::prefs::get_prefs_inner(prefs_state);
+    let checkpoint = prefs
+        .last_crash_check
+        .or_else(|| crate::crash::path_mtime_secs(prefs_state.path()))
+        .unwrap_or(0);
+    let Some(newest) = crate::crash::newest_crash_timestamp_after(checkpoint)? else {
+        if prefs.last_crash_check.is_none() {
+            prefs.last_crash_check = Some(crate::crash::current_timestamp_secs());
+            crate::commands::prefs::set_prefs_inner(prefs_state, prefs)?;
+        }
+        return Ok(());
+    };
+
+    let _ = app
+        .notification()
+        .builder()
+        .title("openmacro recovered from a crash")
+        .body("openmacro recovered from a crash — see crashes folder")
+        .show();
+    prefs.last_crash_check = Some(newest);
+    crate::commands::prefs::set_prefs_inner(prefs_state, prefs)
 }
 
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
@@ -126,6 +169,8 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::crash::install_panic_hook();
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             crate::commands::snippets::list_snippets,
@@ -156,6 +201,7 @@ pub fn run() {
         .setup(|app| {
             let snippets_root = crate::commands::snippets::snippets_root().map_err(setup_error)?;
             fs::create_dir_all(&snippets_root).map_err(tauri::Error::from)?;
+            seed_default_snippets_if_empty(&snippets_root).map_err(setup_error)?;
             let snippet_state = crate::commands::snippets::SnippetStoreState::load(snippets_root.clone())
                 .map_err(setup_error)?;
             let watcher = crate::store::watch_root(snippets_root).map_err(|error| setup_error(error.to_string()))?;
@@ -173,6 +219,7 @@ pub fn run() {
             });
             snippet_state.set_watcher(watcher);
             let prefs_state = crate::commands::prefs::load_prefs_state().map_err(setup_error)?;
+            notify_if_recovered_from_crash(app.handle(), &prefs_state).map_err(setup_error)?;
             let form_runner = Arc::new(crate::form::FormRunner::new(app.handle().clone()));
             let sync_state =
                 crate::commands::sync::SyncCommandState::new(crate::commands::sync::sync_root().map_err(setup_error)?);
@@ -201,7 +248,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::{fs, path::{Path, PathBuf}};
+    use tempfile::TempDir;
 
     #[test]
     fn single_instance_mutex_name_matches_spec() {
@@ -228,5 +276,18 @@ mod tests {
         );
 
         std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+    }
+
+    #[test]
+    fn seeds_default_yaml_only_when_directory_is_empty() {
+        let root = TempDir::new().unwrap();
+
+        super::seed_default_snippets_if_empty(root.path()).unwrap();
+        let contents = fs::read_to_string(root.path().join("default.yaml")).unwrap();
+
+        assert!(contents.contains(";sig"));
+        fs::write(root.path().join("custom.yaml"), "user").unwrap();
+        super::seed_default_snippets_if_empty(root.path()).unwrap();
+        assert_eq!(fs::read_to_string(root.path().join("custom.yaml")).unwrap(), "user");
     }
 }

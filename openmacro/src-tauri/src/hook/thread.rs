@@ -1,6 +1,7 @@
 //! Win32 low-level keyboard hook thread.
 
 use std::{
+    panic::{self, AssertUnwindSafe},
     ptr,
     sync::mpsc,
     thread::{self, JoinHandle},
@@ -20,16 +21,23 @@ impl Hook {
         let (ready_tx, ready_rx) = mpsc::channel();
 
         let join_handle = thread::spawn(move || {
-            #[cfg(windows)]
-            {
-                let result = run_hook_thread(&mut producer);
-                let _ = ready_tx.send(result.map_err(|error| error.to_string()));
-            }
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                #[cfg(windows)]
+                {
+                    let result = run_hook_thread(&mut producer);
+                    let _ = ready_tx.send(result.map_err(|error| error.to_string()));
+                }
 
-            #[cfg(not(windows))]
-            {
-                let _ = producer.push(HookEvent::Reset(ResetCause::ImeOrComposition));
-                let _ = ready_tx.send(Ok(()));
+                #[cfg(not(windows))]
+                {
+                    let _ = producer.push(HookEvent::Reset(ResetCause::ImeOrComposition));
+                    let _ = ready_tx.send(Ok(()));
+                }
+            }));
+
+            if let Err(payload) = result {
+                let _ = crate::crash::write_caught_panic_dump("hook thread", payload.as_ref());
+                let _ = ready_tx.send(Err("hook thread panicked".to_string()));
             }
         });
 

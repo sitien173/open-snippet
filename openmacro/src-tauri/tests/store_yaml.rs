@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use openmacro_lib::store::{load_from_root, LoadResult, VarKind};
 use tempfile::TempDir;
@@ -314,4 +314,17 @@ snippets:
     assert_eq!(var.cmd, vec!["cmd", "/c", "ver"]);
     assert_eq!(var.timeout_ms, Some(1000));
     assert!(var.confirm);
+}
+
+#[test]
+fn shipped_default_yaml_loads_without_errors() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let shipped_root = manifest_dir.parent().unwrap().join("snippets");
+
+    let result = load_from_root(&shipped_root).unwrap();
+
+    assert!(result.errors.is_empty());
+    assert_eq!(result.snippets.len(), 5);
+    assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";sig"));
+    assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";head"));
 }

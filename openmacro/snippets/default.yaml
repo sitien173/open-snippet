@@ -1,0 +1,27 @@
+version: 1
+snippets:
+  - trigger: ";sig"
+    replace: "Best,\n— $|$"
+  - trigger: ";now"
+    replace: "It is {{date}} at {{time}} right now."
+  - trigger: ";log"
+    replace: "console.log(\"$|$\");"
+  - trigger: ";for"
+    replace: "Hello {{name}}! Re: {{topic}}.\n\n$|$"
+    vars:
+      - name: name
+        kind: form
+        label: "Recipient"
+        required: true
+      - name: topic
+        kind: form
+        label: "Topic"
+        required: true
+  - trigger: ";head"
+    replace: "// Current branch: {{branch}}"
+    vars:
+      - name: branch
+        kind: shell
+        cmd: ["git", "rev-parse", "--abbrev-ref", "HEAD"]
+        timeout_ms: 2000
+        confirm: false
