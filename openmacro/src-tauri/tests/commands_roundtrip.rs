@@ -59,6 +59,9 @@ snippets:
                 required: false,
                 options: Vec::new(),
                 format: None,
+                cmd: Vec::new(),
+                timeout_ms: None,
+                confirm: false,
             }],
         },
     )

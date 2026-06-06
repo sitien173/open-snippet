@@ -27,6 +27,12 @@ pub struct VarDecl {
     pub options: Vec<String>,
     #[serde(default)]
     pub format: Option<String>,
+    #[serde(default)]
+    pub cmd: Vec<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -5,6 +5,7 @@ use std::{
 };
 
 use openmacro_lib::{
+    commands::prefs::Prefs,
     expand::{ClipboardReader, Resolver},
     form::{
         capture_foreground_with, restore_on_submit, FocusBackend, FocusError, ForegroundWindow,
@@ -102,6 +103,9 @@ async fn restore_is_called_with_captured_value_on_submit() {
         required: true,
         options: Vec::new(),
         format: None,
+        cmd: Vec::new(),
+        timeout_ms: None,
+        confirm: false,
     }]);
     let runner_task = {
         let runner = Arc::clone(&runner);
@@ -134,6 +138,9 @@ async fn restore_is_not_called_on_cancel() {
         required: true,
         options: Vec::new(),
         format: None,
+        cmd: Vec::new(),
+        timeout_ms: None,
+        confirm: false,
     }]);
     let runner_task = {
         let runner = Arc::clone(&runner);
@@ -161,6 +168,9 @@ async fn reentrancy_rejects_second_run() {
         required: true,
         options: Vec::new(),
         format: None,
+        cmd: Vec::new(),
+        timeout_ms: None,
+        confirm: false,
     }]);
 
     let first = {
@@ -189,12 +199,18 @@ fn form_values_overlay_produces_resolved_text() {
             required: true,
             options: Vec::new(),
             format: None,
+            cmd: Vec::new(),
+            timeout_ms: None,
+            confirm: false,
         }],
     );
     let mut clipboard = StubClipboard;
     let values = BTreeMap::from([("name".to_string(), "Ada".to_string())]);
+    let prefs = Prefs::default();
 
-    let resolved = Resolver::resolve(&snippet, &mut clipboard, Some(&values)).unwrap();
+    let resolved = Resolver::new(&prefs)
+        .resolve(&snippet, &mut clipboard, Some(&values))
+        .unwrap();
 
     assert_eq!(resolved.text, "Hello Ada");
 }

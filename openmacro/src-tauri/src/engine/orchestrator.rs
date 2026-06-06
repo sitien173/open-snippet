@@ -2,13 +2,17 @@
 
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
 };
 
 use crate::{
-    expand::{ResolveError, Resolver},
+    commands::prefs::Prefs,
+    expand::{
+        shell::{NoopShellBackend, ShellBackend},
+        ResolveError, ResolveNotifySink, Resolver,
+    },
     form::{restore_on_submit, FocusBackend, FormOutcome, FormRunner, NoopFocusBackend, NoopWindowSink},
     hook::{HookEvent, ResetCause},
     inject::{InjectError, InjectPlan, Injector, KeyboardSink, SUSPEND},
@@ -41,38 +45,25 @@ pub fn toggle_paused() -> bool {
     next
 }
 
-pub trait NotifySink {
-    fn unknown_placeholder(&mut self, snippet_id: &str, name: &str);
-}
-
-impl<R: tauri::Runtime> NotifySink for AppHandle<R> {
-    fn unknown_placeholder(&mut self, snippet_id: &str, name: &str) {
-        let _ = self
-            .notification()
-            .builder()
-            .title("openmacro placeholder error")
-            .body(format!("Unknown placeholder `{name}` in `{snippet_id}`."))
-            .show();
-    }
-}
-
 #[derive(Default)]
 pub struct NoopNotifySink;
 
-impl NotifySink for NoopNotifySink {
-    fn unknown_placeholder(&mut self, _snippet_id: &str, _name: &str) {}
+impl ResolveNotifySink for NoopNotifySink {
+    fn unknown_placeholder(&self, _snippet_id: &str, _name: &str) {}
 }
 
 pub struct Orchestrator<
     S: KeyboardSink + Send + 'static,
     B: crate::inject::clipboard::ClipboardBackend,
-    N: NotifySink = NoopNotifySink,
+    N: ResolveNotifySink = NoopNotifySink,
 > {
     matcher: Matcher,
     buffer: MatchBuffer,
     snippets: HashMap<Arc<str>, Snippet>,
     injector: Arc<Mutex<Injector<S, B>>>,
     notifier: N,
+    prefs: Arc<RwLock<Prefs>>,
+    shell_backend: Arc<dyn ShellBackend>,
     runtime: tokio::runtime::Handle,
     form_runner: Arc<FormRunner>,
     focus: Arc<dyn FocusBackend>,
@@ -81,18 +72,35 @@ pub struct Orchestrator<
 
 impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend> Orchestrator<S, B> {
     pub fn new(snippets: Vec<Snippet>, injector: Injector<S, B>, runtime: tokio::runtime::Handle) -> Self {
-        Self::new_with_notifier(
+        Self::new_with_state(
             snippets,
             injector,
             NoopNotifySink,
             runtime,
             Arc::new(FormRunner::new_with_sink(NoopWindowSink)),
             Arc::new(NoopFocusBackend),
+            Arc::new(RwLock::new(Prefs::default())),
+            Arc::new(NoopShellBackend),
         )
     }
 }
 
-impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend, N: NotifySink>
+impl<R: tauri::Runtime> ResolveNotifySink for AppHandle<R> {
+    fn unknown_placeholder(&self, snippet_id: &str, name: &str) {
+        let _ = self
+            .notification()
+            .builder()
+            .title("openmacro placeholder error")
+            .body(format!("Unknown placeholder `{name}` in `{snippet_id}`."))
+            .show();
+    }
+
+    fn confirm_shell(&self, _snippet_id: &str, _name: &str, _args: &[String]) -> bool {
+        false
+    }
+}
+
+impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend, N: ResolveNotifySink>
     Orchestrator<S, B, N>
 {
     pub fn new_with_notifier(
@@ -102,6 +110,29 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
         runtime: tokio::runtime::Handle,
         form_runner: Arc<FormRunner>,
         focus: Arc<dyn FocusBackend>,
+    ) -> Self {
+        Self::new_with_state(
+            snippets,
+            injector,
+            notifier,
+            runtime,
+            form_runner,
+            focus,
+            Arc::new(RwLock::new(Prefs::default())),
+            Arc::new(NoopShellBackend),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_state(
+        snippets: Vec<Snippet>,
+        injector: Injector<S, B>,
+        notifier: N,
+        runtime: tokio::runtime::Handle,
+        form_runner: Arc<FormRunner>,
+        focus: Arc<dyn FocusBackend>,
+        prefs: Arc<RwLock<Prefs>>,
+        shell_backend: Arc<dyn ShellBackend>,
     ) -> Self {
         let mut matcher = Matcher::new();
         let _ = matcher.rebuild(&snippets);
@@ -116,6 +147,8 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
             snippets,
             injector: Arc::new(Mutex::new(injector)),
             notifier,
+            prefs,
+            shell_backend,
             runtime,
             form_runner,
             focus,
@@ -146,7 +179,11 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
                 };
 
                 let mut injector = self.injector.lock().unwrap();
-                let resolved = match Resolver::resolve(snippet, injector.clipboard_mut(), None) {
+                let prefs = self.prefs.read().unwrap().clone();
+                let resolver = Resolver::new(&prefs)
+                    .with_notify_sink(&self.notifier)
+                    .with_shell_backend(self.shell_backend.as_ref());
+                let resolved = match resolver.resolve(snippet, injector.clipboard_mut(), None) {
                     Ok(resolved) => resolved,
                     Err(ResolveError::UnknownPlaceholder { name }) => {
                         self.buffer.reset();
@@ -170,7 +207,10 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
                     let injector = Arc::clone(&self.injector);
                     let focus = Arc::clone(&self.focus);
                     let form_runner = Arc::clone(&self.form_runner);
+                    let prefs = Arc::clone(&self.prefs);
+                    let shell_backend = Arc::clone(&self.shell_backend);
                     let max_expansion_len = self.max_expansion_len;
+                    let notifier = Arc::new(NoopNotifySink);
                     self.runtime.spawn(async move {
                         let outcome = form_runner.run(&snippet, hwnd).await;
                         let Ok(outcome) = outcome else {
@@ -181,9 +221,15 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
                         };
 
                         let mut clipboard = injector.lock().unwrap();
-                        let Ok(resolved) =
-                            Resolver::resolve(&snippet, clipboard.clipboard_mut(), Some(values))
-                        else {
+                        let prefs = prefs.read().unwrap().clone();
+                        let resolver = Resolver::new(&prefs)
+                            .with_notify_sink(notifier.as_ref())
+                            .with_shell_backend(shell_backend.as_ref());
+                        let Ok(resolved) = resolver.resolve(
+                            &snippet,
+                            clipboard.clipboard_mut(),
+                            Some(values),
+                        ) else {
                             return;
                         };
                         if resolved.text.chars().count() > max_expansion_len {
@@ -241,11 +287,16 @@ fn map_reset(cause: ResetCause) -> Reset {
 mod tests {
     use std::{
         path::PathBuf,
-        sync::Arc,
+        sync::{Arc, Mutex, RwLock},
         sync::atomic::Ordering,
     };
 
     use crate::{
+        commands::prefs::Prefs,
+        expand::{
+            shell::{ShellBackend, ShellError},
+            ResolveNotifySink,
+        },
         form::{
             FocusBackend, FocusError, ForegroundWindow, FormRunner, NoopFocusBackend,
             NoopWindowSink,
@@ -258,7 +309,7 @@ mod tests {
         store::{Snippet, VarDecl, VarKind},
     };
 
-    use super::{is_paused, set_paused, toggle_paused, NoopNotifySink, NotifySink, Orchestrator};
+    use super::{is_paused, set_paused, toggle_paused, NoopNotifySink, Orchestrator};
 
     #[derive(Default)]
     struct MockSink {
@@ -273,13 +324,50 @@ mod tests {
 
     #[derive(Default)]
     struct MockNotifier {
-        messages: Vec<(String, String)>,
+        messages: Mutex<Vec<(String, String)>>,
     }
 
-    impl NotifySink for MockNotifier {
-        fn unknown_placeholder(&mut self, snippet_id: &str, name: &str) {
+    impl ResolveNotifySink for MockNotifier {
+        fn unknown_placeholder(&self, snippet_id: &str, name: &str) {
             self.messages
+                .lock()
+                .unwrap()
                 .push((snippet_id.to_string(), name.to_string()));
+        }
+
+        fn confirm_shell(&self, _snippet_id: &str, _name: &str, _args: &[String]) -> bool {
+            true
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockShellBackend {
+        output: String,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl MockShellBackend {
+        fn new(output: &str) -> Self {
+            Self {
+                output: output.to_string(),
+                calls: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl ShellBackend for MockShellBackend {
+        fn run(
+            &self,
+            args: &[String],
+            _cwd: &std::path::Path,
+            _timeout: std::time::Duration,
+        ) -> Result<String, ShellError> {
+            self.calls.lock().unwrap().push(args.to_vec());
+            Ok(self.output.clone())
         }
     }
 
@@ -420,6 +508,9 @@ mod tests {
                         required: false,
                         options: Vec::new(),
                         format: None,
+                        cmd: Vec::new(),
+                        timeout_ms: None,
+                        confirm: false,
                     }],
                 ),
             ],
@@ -476,8 +567,102 @@ mod tests {
 
         assert!(orchestrator.injector().sink().actions.is_empty());
         assert_eq!(
-            orchestrator.notifier.messages,
+            orchestrator.notifier.messages.into_inner().unwrap(),
             vec![("test::;oops".to_string(), "missing".to_string())]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_snippet_respects_prefs_consent() {
+        let _guard = test_guard();
+        let injector = Injector::new_with_sink(MockSink::default());
+        let prefs = Arc::new(RwLock::new(Prefs::default()));
+        let shell_backend = Arc::new(MockShellBackend::new("hello"));
+        let mut orchestrator = Orchestrator::new_with_state(
+            vec![snippet_with_vars(
+                ";sh",
+                "{{out}}",
+                vec![VarDecl {
+                    name: "out".to_string(),
+                    kind: VarKind::Shell,
+                    label: None,
+                    default: None,
+                    required: false,
+                    options: Vec::new(),
+                    format: None,
+                    cmd: vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+                    timeout_ms: Some(200),
+                    confirm: false,
+                }],
+            )],
+            injector,
+            NoopNotifySink,
+            tokio::runtime::Handle::current(),
+            Arc::new(FormRunner::new_with_sink(NoopWindowSink)),
+            Arc::new(NoopFocusBackend),
+            prefs,
+            shell_backend.clone(),
+        );
+
+        for ch in ";sh".chars() {
+            let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
+        }
+
+        assert!(orchestrator.injector().sink().actions.is_empty());
+        assert!(shell_backend.calls().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_snippet_injects_backend_output_when_consent_enabled() {
+        let _guard = test_guard();
+        let injector = Injector::new_with_sink(MockSink::default());
+        let prefs = Arc::new(RwLock::new(Prefs {
+            shell_consent: true,
+            ..Prefs::default()
+        }));
+        let shell_backend = Arc::new(MockShellBackend::new("hello"));
+        let mut orchestrator = Orchestrator::new_with_state(
+            vec![snippet_with_vars(
+                ";sh",
+                "{{out}}",
+                vec![VarDecl {
+                    name: "out".to_string(),
+                    kind: VarKind::Shell,
+                    label: None,
+                    default: None,
+                    required: false,
+                    options: Vec::new(),
+                    format: None,
+                    cmd: vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+                    timeout_ms: Some(200),
+                    confirm: false,
+                }],
+            )],
+            injector,
+            NoopNotifySink,
+            tokio::runtime::Handle::current(),
+            Arc::new(FormRunner::new_with_sink(NoopWindowSink)),
+            Arc::new(NoopFocusBackend),
+            prefs,
+            shell_backend.clone(),
+        );
+
+        for ch in ";sh".chars() {
+            let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
+        }
+
+        assert_eq!(
+            orchestrator.injector().sink().actions,
+            vec![
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Paste("hello".to_string()),
+            ]
+        );
+        assert_eq!(
+            shell_backend.calls(),
+            vec![vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()]]
         );
     }
 
@@ -503,6 +688,9 @@ mod tests {
                     required: true,
                     options: Vec::new(),
                     format: None,
+                    cmd: Vec::new(),
+                    timeout_ms: None,
+                    confirm: false,
                 }],
             )],
             injector,

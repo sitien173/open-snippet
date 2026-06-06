@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::expand::{strip_cursor_token, CursorTokenError};
 
-use super::{Snippet, VarDecl};
+use super::{Snippet, VarDecl, VarKind};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadResult {
@@ -27,6 +27,8 @@ pub enum LoadError {
     RelativePath { path: PathBuf },
     DuplicateTrigger { path: PathBuf, trigger: String },
     TooManyCursorTokens { path: PathBuf, trigger: String },
+    ShellCmdNotArray { path: PathBuf, trigger: String, name: String },
+    ShellTimeoutInvalid { path: PathBuf, trigger: String, name: String },
 }
 
 impl LoadError {
@@ -38,7 +40,9 @@ impl LoadError {
             | Self::UnsupportedVersion { path, .. }
             | Self::RelativePath { path }
             | Self::DuplicateTrigger { path, .. }
-            | Self::TooManyCursorTokens { path, .. } => path,
+            | Self::TooManyCursorTokens { path, .. }
+            | Self::ShellCmdNotArray { path, .. }
+            | Self::ShellTimeoutInvalid { path, .. } => path,
         }
     }
 
@@ -53,6 +57,12 @@ impl LoadError {
             }
             Self::TooManyCursorTokens { trigger, .. } => {
                 format!("too many cursor tokens in snippet: {trigger}")
+            }
+            Self::ShellCmdNotArray { trigger, name, .. } => {
+                format!("shell var `{name}` in snippet `{trigger}` must declare a non-empty cmd array")
+            }
+            Self::ShellTimeoutInvalid { trigger, name, .. } => {
+                format!("shell var `{name}` in snippet `{trigger}` must declare timeout_ms <= 10000")
             }
         }
     }
@@ -164,13 +174,36 @@ fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
 }
 
 fn validate_snippet(path: &Path, snippet: &SnippetDocument) -> Result<(), LoadError> {
-    match strip_cursor_token(&snippet.replace) {
-        Ok(_) => Ok(()),
-        Err(CursorTokenError::TooManyTokens) => Err(LoadError::TooManyCursorTokens {
+    if let Err(CursorTokenError::TooManyTokens) = strip_cursor_token(&snippet.replace) {
+        return Err(LoadError::TooManyCursorTokens {
             path: path.to_path_buf(),
             trigger: snippet.trigger.clone(),
-        }),
+        });
     }
+
+    for var in &snippet.vars {
+        if var.kind != VarKind::Shell {
+            continue;
+        }
+
+        if var.cmd.is_empty() {
+            return Err(LoadError::ShellCmdNotArray {
+                path: path.to_path_buf(),
+                trigger: snippet.trigger.clone(),
+                name: var.name.clone(),
+            });
+        }
+
+        if var.timeout_ms.is_none() || var.timeout_ms.unwrap_or_default() > 10_000 {
+            return Err(LoadError::ShellTimeoutInvalid {
+                path: path.to_path_buf(),
+                trigger: snippet.trigger.clone(),
+                name: var.name.clone(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn normalize_relative_path(path: &Path) -> String {

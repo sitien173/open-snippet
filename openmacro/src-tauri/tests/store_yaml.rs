@@ -169,6 +169,8 @@ snippets:
       - name: shell_name
         kind: shell
         label: Shell
+        cmd: [cmd, /c, ver]
+        timeout_ms: 1000
       - name: form_name
         kind: form
         label: Form
@@ -190,6 +192,8 @@ snippets:
     assert_eq!(vars[5].kind, VarKind::Clipboard);
     assert_eq!(vars[6].kind, VarKind::Cursor);
     assert_eq!(vars[7].kind, VarKind::Shell);
+    assert_eq!(vars[7].cmd, vec!["cmd".to_string(), "/c".to_string(), "ver".to_string()]);
+    assert_eq!(vars[7].timeout_ms, Some(1000));
     assert_eq!(vars[8].kind, VarKind::Form);
     assert!(vars[0].required);
 }
@@ -221,4 +225,93 @@ snippets:
         "{}",
         result.errors[0].message()
     );
+}
+
+#[test]
+fn shell_cmd_string_is_captured_as_parse_error() {
+    let root = TempDir::new().unwrap();
+    write_yaml(
+        &root,
+        "shell-string.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: ;shell
+    replace: "{{out}}"
+    vars:
+      - name: out
+        kind: shell
+        cmd: "echo hi"
+        timeout_ms: 1000
+"#,
+    );
+
+    let result = load(&root);
+
+    assert!(result.snippets.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(matches!(result.errors[0], openmacro_lib::store::LoadError::Parse { .. }));
+}
+
+#[test]
+fn shell_var_without_timeout_is_rejected() {
+    let root = TempDir::new().unwrap();
+    write_yaml(
+        &root,
+        "shell-missing-timeout.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: ;shell
+    replace: "{{out}}"
+    vars:
+      - name: out
+        kind: shell
+        cmd: [cmd, /c, ver]
+"#,
+    );
+
+    let result = load(&root);
+
+    assert!(result.snippets.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert_eq!(
+        result.errors[0],
+        openmacro_lib::store::LoadError::ShellTimeoutInvalid {
+            path: root.path().join("shell-missing-timeout.yaml"),
+            trigger: ";shell".to_string(),
+            name: "out".to_string(),
+        }
+    );
+}
+
+#[test]
+fn valid_shell_var_loads_with_cmd_and_timeout() {
+    let root = TempDir::new().unwrap();
+    write_yaml(
+        &root,
+        "shell-valid.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: ;shell
+    replace: "{{out}}"
+    vars:
+      - name: out
+        kind: shell
+        cmd: [cmd, /c, ver]
+        timeout_ms: 1000
+        confirm: true
+"#,
+    );
+
+    let result = load(&root);
+
+    assert!(result.errors.is_empty());
+    assert_eq!(result.snippets.len(), 1);
+    let var = &result.snippets[0].vars[0];
+    assert_eq!(var.kind, VarKind::Shell);
+    assert_eq!(var.cmd, vec!["cmd", "/c", "ver"]);
+    assert_eq!(var.timeout_ms, Some(1000));
+    assert!(var.confirm);
 }
