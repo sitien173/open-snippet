@@ -8,7 +8,7 @@ const mockSnippet: Snippet = {
   trigger: "greet",
   replace: "Hello $|$",
   vars: [],
-  source_file: "F:/projects_new/textblaze/openmacro/snippets/default.yaml",
+  source_file: "F:/projects_new/textblaze/snippets/default.yaml",
   file_relative: "snippets/default.yaml",
 };
 

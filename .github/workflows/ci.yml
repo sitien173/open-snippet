@@ -9,7 +9,6 @@ jobs:
     defaults:
       run:
         shell: pwsh
-        working-directory: openmacro
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +20,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: openmacro/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -30,11 +29,11 @@ jobs:
 
       - name: Cargo test
         run: cargo test --all-features -- --test-threads=1
-        working-directory: openmacro/src-tauri
+        working-directory: src-tauri
 
       - name: Cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-        working-directory: openmacro/src-tauri
+        working-directory: src-tauri
 
       - name: Frontend test
         run: pnpm test

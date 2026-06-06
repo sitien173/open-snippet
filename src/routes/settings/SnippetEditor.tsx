@@ -24,7 +24,7 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
     setError(null);
   }, [snippet]);
 
-  const sourceFile = snippet?.source_file || "F:/projects_new/textblaze/openmacro/snippets/default.yaml";
+  const sourceFile = snippet?.source_file || "F:/projects_new/textblaze/snippets/default.yaml";
 
   const isTriggerEmpty = !trigger.trim();
   const isTriggerTooLong = trigger.length > 32;
