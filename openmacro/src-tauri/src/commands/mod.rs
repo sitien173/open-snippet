@@ -3,3 +3,4 @@
 pub mod form;
 pub mod prefs;
 pub mod snippets;
+pub mod sync;
