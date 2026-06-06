@@ -58,7 +58,7 @@ TASK_COMPLETE
 - Next: debt → coordinator backlog; proceed to Phase 5.
 
 ## Squash Commit
-- phase-4: resolvers + cursor token + orchestrator integration  (post-squash hash to be recorded after `git reset --soft HEAD~4 && git commit`)
+- b59e4ef  phase-4: resolvers + cursor token + orchestrator integration
 
 ## Decisions
 - per-task in notes.md.
