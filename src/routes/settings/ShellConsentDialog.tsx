@@ -1,4 +1,5 @@
 import { Prefs } from "../../lib/snippets";
+import { I } from "../../lib/icons";
 
 type ShellConsentDialogProps = {
   prefs: Prefs;
@@ -24,45 +25,48 @@ export function ShellConsentDialog({
 
   return (
     <div
+      className="scrim"
       role="dialog"
       aria-modal="true"
       aria-labelledby="shell-consent-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(15, 23, 42, 0.72)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1.5rem",
-        zIndex: 1000,
-      }}
     >
-      <div
-        style={{
-          width: "min(100%, 32rem)",
-          background: "#111827",
-          color: "#e5e7eb",
-          border: "1px solid #374151",
-          borderRadius: "16px",
-          boxShadow: "0 24px 80px rgba(15, 23, 42, 0.45)",
-          padding: "1.5rem",
-        }}
-      >
-        <h2 id="shell-consent-title" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
-          Shell execution consent
-        </h2>
-        <p style={{ marginTop: 0, lineHeight: 1.5 }}>
-          Some snippets can execute local shell commands. This stays disabled until you accept it.
-        </p>
-        <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end", marginTop: "1.5rem" }}>
-          <button type="button" onClick={onClose}>
+      <div className="modal">
+        <header>
+          <h2 id="shell-consent-title">Shell Execution Consent</h2>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Close dialog"
+            style={{ border: "none", background: "transparent", cursor: "pointer" }}
+          >
+            <I.X />
+          </button>
+        </header>
+
+        <div className="body">
+          <div className="warning-card">
+            <div className="ico">
+              <I.Warn />
+            </div>
+            <div className="body">
+              <div className="title">Security alert</div>
+              <div>Some snippets contain variables that execute local terminal shell commands. Allowing shell execution grants snippets full access to run command line instructions.</div>
+            </div>
+          </div>
+          <p style={{ margin: 0, color: "var(--color-text-subdued)" }}>
+            For your security, shell execution is disabled by default. If you decline, these variables will fail to expand.
+          </p>
+        </div>
+
+        <footer>
+          <button type="button" className="btn btn-secondary" onClick={onClose} style={{ marginRight: "12px" }}>
             Decline
           </button>
-          <button type="button" onClick={handleAccept}>
+          <button type="button" className="btn primary" onClick={handleAccept}>
             Accept
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );

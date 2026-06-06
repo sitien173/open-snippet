@@ -4,6 +4,7 @@ import { SnippetList } from "./SnippetList";
 import { SnippetEditor } from "./SnippetEditor";
 import { PrefsPanel } from "./PrefsPanel";
 import { SyncPanel } from "./SyncPanel";
+import { I } from "../../lib/icons";
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<"snippets" | "preferences" | "sync">("snippets");
@@ -50,108 +51,53 @@ export function Settings() {
   };
 
   return (
-    <div
-      className="settings-layout"
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        backgroundColor: "#1e1e2e",
-        color: "#cdd6f4",
-        fontFamily: "Outfit, Inter, sans-serif",
-      }}
-    >
+    <div className="shell">
       {/* Sidebar Navigation */}
-      <aside
-        className="settings-sidebar"
-        style={{
-          width: "250px",
-          backgroundColor: "#11111b",
-          borderRight: "1px solid #313244",
-          display: "flex",
-          flexDirection: "column",
-          padding: "1.5rem",
-        }}
-      >
-        <div className="sidebar-brand" style={{ marginBottom: "2rem" }}>
-          <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", margin: 0, textAlign: "left" }}>
-            OpenMacro
-          </h1>
-          <span style={{ fontSize: "0.8rem", color: "#a6adc8" }}>Settings Console</span>
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <h1>OpenMacro</h1>
+          <span>Settings Console</span>
         </div>
 
-        <nav style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <nav style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
           <button
             type="button"
+            className={`nav-item ${activeTab === "snippets" && !isEditorOpen ? "active" : ""}`}
             onClick={() => {
               setActiveTab("snippets");
               setIsEditorOpen(false);
             }}
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeTab === "snippets" && !isEditorOpen ? "#313244" : "transparent",
-              color: activeTab === "snippets" && !isEditorOpen ? "#cdd6f4" : "#a6adc8",
-              textAlign: "left",
-              cursor: "pointer",
-              boxShadow: "none",
-              transition: "all 0.2s ease",
-            }}
           >
-            ✂ Snippets
+            <I.Scissors />
+            Snippets
           </button>
           <button
             type="button"
+            className={`nav-item ${activeTab === "preferences" ? "active" : ""}`}
             onClick={() => {
               setActiveTab("preferences");
               setIsEditorOpen(false);
             }}
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeTab === "preferences" ? "#313244" : "transparent",
-              color: activeTab === "preferences" ? "#cdd6f4" : "#a6adc8",
-              textAlign: "left",
-              cursor: "pointer",
-              boxShadow: "none",
-              transition: "all 0.2s ease",
-            }}
           >
-            ⚙ Preferences
+            <I.Settings />
+            Preferences
           </button>
           <button
             type="button"
+            className={`nav-item ${activeTab === "sync" ? "active" : ""}`}
             onClick={() => {
               setActiveTab("sync");
               setIsEditorOpen(false);
             }}
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: "8px",
-              border: "none",
-              backgroundColor: activeTab === "sync" ? "#313244" : "transparent",
-              color: activeTab === "sync" ? "#cdd6f4" : "#a6adc8",
-              textAlign: "left",
-              cursor: "pointer",
-              boxShadow: "none",
-              transition: "all 0.2s ease",
-            }}
           >
-            🔄 Sync & Diagnostics
+            <I.RefreshCw />
+            Sync & Diagnostics
           </button>
         </nav>
       </aside>
 
       {/* Main Content Area */}
-      <main
-        className="settings-content"
-        style={{
-          flex: 1,
-          padding: "2.5rem",
-          overflowY: "auto",
-        }}
-      >
+      <main className="main-content">
         {isEditorOpen ? (
           <SnippetEditor
             snippet={editingSnippet}
@@ -161,7 +107,7 @@ export function Settings() {
           />
         ) : (
           <>
-            {loading && <div style={{ color: "#a6adc8", marginBottom: "1rem" }}>Loading snippets...</div>}
+            {loading && <div style={{ color: "var(--color-text-subdued)", marginBottom: "1rem" }}>Loading snippets...</div>}
             {activeTab === "snippets" && (
               <SnippetList
                 snippets={snippets}

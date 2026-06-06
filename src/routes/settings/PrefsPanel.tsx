@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Prefs, getPrefs, listSnippets, setPrefs } from "../../lib/snippets";
 import { ShellConsentDialog } from "./ShellConsentDialog";
+import { I } from "../../lib/icons";
 
 export function PrefsPanel() {
   const [prefs, setPrefsState] = useState<Prefs | null>(null);
@@ -60,81 +61,112 @@ export function PrefsPanel() {
   };
 
   if (loading) {
-    return <div className="panel-loading">Loading preferences...</div>;
+    return <div style={{ color: "var(--color-text-subdued)", padding: "16px" }}>Loading preferences...</div>;
   }
 
   if (!prefs) {
-    return <div className="panel-error">Failed to load preferences.</div>;
+    return (
+      <div className="warning-card" style={{ background: "var(--color-decorative-red)", borderColor: "var(--color-border-red)" }}>
+        <div className="ico" style={{ color: "var(--color-text-red)" }}>
+          <I.Warn />
+        </div>
+        <div className="body" style={{ color: "var(--color-text-red)" }}>
+          <div className="title" style={{ color: "var(--color-text-red)", fontWeight: 600 }}>Failed to load preferences</div>
+          <div>Please check console logs or restart the application.</div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <>
-      <div data-testid="prefs-panel" className="prefs-panel">
-        <div className="panel-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2>Preferences</h2>
-          {saveStatus && <span className="save-status-tag">{saveStatus}</span>}
+      <div data-testid="prefs-panel" className="prefs-panel" style={{ maxWidth: "660px" }}>
+        <div className="toolbar" style={{ marginBottom: "24px" }}>
+          <div className="toolbar-left">
+            <h2>Preferences</h2>
+          </div>
+          <div className="toolbar-right">
+            {saveStatus && (
+              <span className={`badge ${saveStatus.includes("Error") ? "red" : saveStatus === "Saved" ? "green" : "gray"}`}>
+                <span className="dot" />
+                {saveStatus}
+              </span>
+            )}
+          </div>
         </div>
 
-        <div className="prefs-form" style={{ marginTop: "1rem" }}>
-          <div className="pref-item" style={{ marginBottom: "1.5rem" }}>
-            <label htmlFor="pref-paused" className="pref-label" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-              <input
-                id="pref-paused"
-                type="checkbox"
-                checked={prefs.paused}
-                onChange={(e) => handleChange("paused", e.target.checked)}
-              />
-              <span>Pause text expansion</span>
-            </label>
-            <p className="pref-desc" style={{ margin: "0.25rem 0 0 1.5rem", fontSize: "0.85rem", opacity: 0.8 }}>
-              Temporarily disable all macro and snippet expansions.
-            </p>
+        <div className="panel" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div className="pref-item" style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+            <input
+              id="pref-paused"
+              type="checkbox"
+              checked={prefs.paused}
+              onChange={(e) => handleChange("paused", e.target.checked)}
+              style={{ marginTop: "4px", width: "16px", height: "16px", cursor: "pointer" }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label htmlFor="pref-paused" style={{ fontWeight: 500, cursor: "pointer" }}>Pause text expansion</label>
+              <span style={{ fontSize: "12px", color: "var(--color-text-subdued)" }}>
+                Temporarily disable all macro and snippet expansions.
+              </span>
+            </div>
           </div>
 
-          <div className="pref-item" style={{ marginBottom: "1.5rem" }}>
-            <label htmlFor="pref-autostart" className="pref-label" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-              <input
-                id="pref-autostart"
-                type="checkbox"
-                checked={prefs.autostart}
-                onChange={(e) => handleChange("autostart", e.target.checked)}
-              />
-              <span>Start on system boot</span>
-            </label>
-            <p className="pref-desc" style={{ margin: "0.25rem 0 0 1.5rem", fontSize: "0.85rem", opacity: 0.8 }}>
-              Automatically launch OpenMacro when logging into your computer.
-            </p>
+          <div className="pref-item" style={{ display: "flex", alignItems: "flex-start", gap: "12px", borderTop: "1px solid var(--color-border-subdued)", paddingTop: "16px" }}>
+            <input
+              id="pref-autostart"
+              type="checkbox"
+              checked={prefs.autostart}
+              onChange={(e) => handleChange("autostart", e.target.checked)}
+              style={{ marginTop: "4px", width: "16px", height: "16px", cursor: "pointer" }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label htmlFor="pref-autostart" style={{ fontWeight: 500, cursor: "pointer" }}>Start on system boot</label>
+              <span style={{ fontSize: "12px", color: "var(--color-text-subdued)" }}>
+                Automatically launch OpenMacro when logging into your computer.
+              </span>
+            </div>
           </div>
 
-          <div className="pref-item" style={{ marginBottom: "1.5rem" }}>
-            <label htmlFor="pref-max-len" className="pref-label" style={{ display: "block", marginBottom: "0.25rem" }}>
-              Max expansion length
-            </label>
+          <div className="field" style={{ borderTop: "1px solid var(--color-border-subdued)", paddingTop: "16px", marginBottom: 0 }}>
+            <label htmlFor="pref-max-len" style={{ fontWeight: 500 }}>Max expansion length</label>
             <input
               id="pref-max-len"
               type="number"
               value={prefs.max_expansion_len}
               onChange={(e) => handleChange("max_expansion_len", parseInt(e.target.value, 10) || 0)}
-              style={{ width: "100%", maxWidth: "300px" }}
+              style={{ width: "100%", maxWidth: "200px", height: "36px", padding: "6px 10px" }}
             />
-            <p className="pref-desc" style={{ margin: "0.25rem 0 0 0", fontSize: "0.85rem", opacity: 0.8 }}>
+            <span className="help">
               The maximum characters a snippet is allowed to expand into (safety limit).
-            </p>
+            </span>
           </div>
 
-          <div className="pref-item" style={{ marginBottom: "1.5rem" }}>
-            <label htmlFor="pref-shell-consent" className="pref-label" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-              <input
-                id="pref-shell-consent"
-                type="checkbox"
-                checked={prefs.shell_consent}
-                onChange={(e) => handleChange("shell_consent", e.target.checked)}
-              />
-              <span>Allow shell execution</span>
-            </label>
-            <p className="pref-desc" style={{ margin: "0.25rem 0 0 1.5rem", fontSize: "0.85rem", opacity: 0.8 }}>
-              Enable running arbitrary terminal shell commands specified in snippet vars.
-            </p>
+          <div className="pref-item" style={{ display: "flex", alignItems: "flex-start", gap: "12px", borderTop: "1px solid var(--color-border-subdued)", paddingTop: "16px" }}>
+            <input
+              id="pref-shell-consent"
+              type="checkbox"
+              checked={prefs.shell_consent}
+              onChange={(e) => handleChange("shell_consent", e.target.checked)}
+              style={{ marginTop: "4px", width: "16px", height: "16px", cursor: "pointer" }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
+              <label htmlFor="pref-shell-consent" style={{ fontWeight: 500, cursor: "pointer" }}>Allow shell execution</label>
+              <span style={{ fontSize: "12px", color: "var(--color-text-subdued)", marginBottom: "8px" }}>
+                Enable running arbitrary terminal shell commands specified in snippet vars.
+              </span>
+              {prefs.shell_consent && (
+                <div className="warning-card">
+                  <div className="ico">
+                    <I.Warn />
+                  </div>
+                  <div className="body">
+                    <div className="title">Security alert</div>
+                    <div>Shell execution allows snippets to run arbitrary terminal commands on your system. Ensure you trust all saved snippet sources.</div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

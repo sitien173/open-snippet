@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-
 import { syncInit, SyncAuthMode, syncStatus, SyncStatus, syncTestConnection, syncTickNow, TickReport } from "../../lib/sync";
+import { I } from "../../lib/icons";
 
 type AuthChoice = "https" | "ssh";
 
@@ -60,9 +60,10 @@ export function SyncPanel() {
       return;
     }
 
+    setInlineMessage("Testing connection...");
     try {
       await syncTestConnection(remote, auth(), authChoice === "https" ? pat : undefined);
-      setInlineMessage("Connection OK.");
+      setInlineMessage("Connection OK");
     } catch (err) {
       setInlineMessage(err instanceof Error ? err.message : String(err));
     }
@@ -75,9 +76,10 @@ export function SyncPanel() {
       return;
     }
 
+    setInlineMessage("Initializing...");
     try {
       await syncInit(remote, auth(), authChoice === "https" ? pat : undefined);
-      setInlineMessage("Sync initialized.");
+      setInlineMessage("Sync initialized successfully");
       setStatus(await syncStatus());
     } catch (err) {
       setInlineMessage(err instanceof Error ? err.message : String(err));
@@ -85,6 +87,7 @@ export function SyncPanel() {
   };
 
   const handleTickNow = async () => {
+    setTickMessage("Syncing...");
     try {
       const report = await syncTickNow();
       setTickMessage(formatTickReport(report));
@@ -94,88 +97,165 @@ export function SyncPanel() {
     }
   };
 
+  const isMsgError = (msg: string | null) => {
+    if (!msg) return false;
+    const lower = msg.toLowerCase();
+    return lower.includes("failed") || lower.includes("error") || lower.includes("required") || lower.includes("invalid") || lower.includes("could not");
+  };
+
+  const isMsgSuccess = (msg: string | null) => {
+    if (!msg) return false;
+    const lower = msg.toLowerCase();
+    return lower.includes("ok") || lower.includes("success") || lower.includes("synced");
+  };
+
   return (
-    <div data-testid="sync-panel" className="sync-panel">
-      <h2>Git Sync</h2>
-      <div style={{ display: "grid", gap: "1rem", maxWidth: "40rem" }}>
-        <label htmlFor="sync-remote">
-          Remote URL
-          <input
-            id="sync-remote"
-            type="text"
-            value={remote}
-            onChange={(event) => setRemote(event.target.value)}
-            style={{ display: "block", width: "100%", marginTop: "0.35rem" }}
-          />
-        </label>
+    <div data-testid="sync-panel" className="sync-panel" style={{ maxWidth: "660px" }}>
+      <div className="toolbar" style={{ marginBottom: "24px" }}>
+        <div className="toolbar-left">
+          <h2>Git Sync</h2>
+        </div>
+      </div>
 
-        <fieldset>
-          <legend>Auth</legend>
-          <label htmlFor="sync-auth-https" style={{ marginRight: "1rem" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        {/* Form Panel */}
+        <div className="panel" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div className="field">
+            <label htmlFor="sync-remote">Remote URL</label>
             <input
-              id="sync-auth-https"
-              type="radio"
-              name="sync-auth"
-              checked={authChoice === "https"}
-              onChange={() => setAuthChoice("https")}
+              id="sync-remote"
+              type="text"
+              placeholder="e.g. https://github.com/user/snippets.git"
+              value={remote}
+              onChange={(event) => setRemote(event.target.value)}
+              style={{ width: "100%" }}
             />
-            HTTPS PAT
-          </label>
-          <label htmlFor="sync-auth-ssh">
-            <input
-              id="sync-auth-ssh"
-              type="radio"
-              name="sync-auth"
-              checked={authChoice === "ssh"}
-              onChange={() => setAuthChoice("ssh")}
-            />
-            SSH
-          </label>
-        </fieldset>
+            <span className="help">The Git repository URL where your snippets are stored.</span>
+          </div>
 
-        {authChoice === "https" && (
-          <>
-            <label htmlFor="sync-username">
-              Username
-              <input
-                id="sync-username"
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                style={{ display: "block", width: "100%", marginTop: "0.35rem" }}
-              />
-            </label>
-            <label htmlFor="sync-pat">
-              Personal Access Token
-              <input
-                id="sync-pat"
-                type="password"
-                value={pat}
-                onChange={(event) => setPat(event.target.value)}
-                style={{ display: "block", width: "100%", marginTop: "0.35rem" }}
-              />
-            </label>
-          </>
-        )}
+          <div className="field">
+            <label>Authentication mode</label>
+            <div style={{ display: "flex", gap: "24px", marginTop: "4px" }}>
+              <label htmlFor="sync-auth-https" style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "normal", cursor: "pointer" }}>
+                <input
+                  id="sync-auth-https"
+                  type="radio"
+                  name="sync-auth"
+                  checked={authChoice === "https"}
+                  onChange={() => setAuthChoice("https")}
+                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                HTTPS PAT
+              </label>
+              <label htmlFor="sync-auth-ssh" style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "normal", cursor: "pointer" }}>
+                <input
+                  id="sync-auth-ssh"
+                  type="radio"
+                  name="sync-auth"
+                  checked={authChoice === "ssh"}
+                  onChange={() => setAuthChoice("ssh")}
+                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                SSH keys
+              </label>
+            </div>
+          </div>
 
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          <button type="button" onClick={handleTestConnection}>Test Connection</button>
-          <button type="button" onClick={handleInit}>Save & Init</button>
-          <button type="button" onClick={handleTickNow}>Sync Now</button>
+          {authChoice === "https" && (
+            <>
+              <div className="field">
+                <label htmlFor="sync-username">Username</label>
+                <input
+                  id="sync-username"
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  style={{ width: "100%", maxWidth: "300px" }}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="sync-pat">Personal access token</label>
+                <input
+                  id="sync-pat"
+                  type="password"
+                  value={pat}
+                  onChange={(event) => setPat(event.target.value)}
+                  style={{ width: "100%", maxWidth: "400px" }}
+                />
+              </div>
+            </>
+          )}
+
+          <div className="toolbar" style={{ marginTop: "8px", marginBottom: 0 }}>
+            <div className="toolbar-left">
+              <button type="button" className="btn btn-secondary" onClick={handleTestConnection}>
+                Test connection
+              </button>
+            </div>
+            <div className="toolbar-right">
+              <button type="button" className="btn primary" onClick={handleInit}>
+                Save & initialize
+              </button>
+            </div>
+          </div>
+
+          {inlineMessage && (
+            <div
+              className={`badge ${isMsgError(inlineMessage) ? "red" : isMsgSuccess(inlineMessage) ? "green" : "gray"}`}
+              style={{ alignSelf: "flex-start", marginTop: "8px" }}
+            >
+              <span className="dot" />
+              {inlineMessage}
+            </div>
+          )}
         </div>
 
-        {inlineMessage && <div>{inlineMessage}</div>}
-        {tickMessage && <div>{tickMessage}</div>}
+        {/* Sync Actions & Status Panel */}
+        <div className="panel" style={{ padding: "24px" }}>
+          <div className="toolbar" style={{ borderBottom: "1px solid var(--color-border-subdued)", paddingBottom: "12px", marginBottom: "16px" }}>
+            <div className="toolbar-left">
+              <h3 style={{ margin: 0 }}>Sync status</h3>
+            </div>
+            <div className="toolbar-right">
+              <button type="button" className="btn btn-secondary sm" onClick={handleTickNow}>
+                <I.RefreshCw style={{ width: 12, height: 12, marginRight: "4px" }} />
+                Sync now
+              </button>
+            </div>
+          </div>
 
-        <div>
-          <strong>Status</strong>
+          {tickMessage && (
+            <div
+              className={`badge ${isMsgError(tickMessage) ? "red" : isMsgSuccess(tickMessage) ? "green" : "gray"}`}
+              style={{ marginBottom: "16px" }}
+            >
+              <span className="dot" />
+              {tickMessage}
+            </div>
+          )}
+
           {loadingStatus ? (
-            <div>Loading status...</div>
+            <div style={{ color: "var(--color-text-subdued)" }}>Loading status...</div>
           ) : (
-            <div>
-              <div>Branch: {status.branch ?? "—"}</div>
-              <div>Ahead/Behind: {status.ahead}/{status.behind}</div>
-              <div>Last Tick: {status.last_tick_unix ?? "—"}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span style={{ fontSize: "12px", color: "var(--color-text-placeholder)", textTransform: "uppercase", fontWeight: 500 }}>Active branch</span>
+                <span className="mono" style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-default)" }}>
+                  {status.branch ?? "—"}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span style={{ fontSize: "12px", color: "var(--color-text-placeholder)", textTransform: "uppercase", fontWeight: 500 }}>Ahead / Behind</span>
+                <span className="mono" style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-default)" }}>
+                  {status.ahead} / {status.behind}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span style={{ fontSize: "12px", color: "var(--color-text-placeholder)", textTransform: "uppercase", fontWeight: 500 }}>Last sync tick</span>
+                <span className="mono" style={{ fontSize: "14px", fontWeight: 600, color: "var(--color-text-default)" }}>
+                  {status.last_tick_unix ? new Date(status.last_tick_unix * 1000).toLocaleString() : "—"}
+                </span>
+              </div>
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Snippet } from "../../lib/snippets";
+import { I } from "../../lib/icons";
 
 export interface SnippetListProps {
   snippets: Snippet[];
@@ -21,84 +22,84 @@ export function SnippetList({ snippets, onEditSnippet, onCreateSnippet }: Snippe
 
   return (
     <div data-testid="snippet-list" className="snippet-list-container">
-      <div
-        className="list-header"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "1rem",
-        }}
-      >
-        <h2>Snippets</h2>
-        <button type="button" onClick={onCreateSnippet} className="create-btn">
-          Create Snippet
-        </button>
+      {/* Header and Create Button */}
+      <div className="toolbar" style={{ marginBottom: "24px" }}>
+        <div className="toolbar-left">
+          <h2>Snippets</h2>
+        </div>
+        <div className="toolbar-right">
+          <button type="button" onClick={onCreateSnippet} className="btn primary" style={{ height: "36px", padding: "0 12px", fontSize: "14px" }}>
+            <I.Plus style={{ width: 14, height: 14, marginRight: "6px" }} />
+            Create snippet
+          </button>
+        </div>
       </div>
 
-      <div style={{ marginBottom: "1rem" }}>
-        <label htmlFor="search-snippets" style={{ display: "none" }}>
-          Search Snippets
-        </label>
-        <input
-          id="search-snippets"
-          type="text"
-          placeholder="Search by trigger, replacement, file..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: "100%", padding: "0.5rem" }}
-        />
+      {/* Search Bar */}
+      <div className="toolbar" style={{ marginBottom: "16px" }}>
+        <div className="toolbar-left" style={{ width: "100%" }}>
+          <div className="search-input-group" style={{ width: "100%" }}>
+            <I.Search />
+            <input
+              id="search-snippets"
+              type="text"
+              placeholder="Search by trigger, replacement, file..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search snippets"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="table-wrapper" style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      {/* Table Section */}
+      <div className="panel">
+        <table className="table">
           <thead>
-            <tr style={{ borderBottom: "2px solid #444", textAlign: "left" }}>
-              <th style={{ padding: "0.5rem" }}>Trigger</th>
-              <th style={{ padding: "0.5rem" }}>Replacement</th>
-              <th style={{ padding: "0.5rem" }}>File</th>
-              <th style={{ padding: "0.5rem" }}>Vars</th>
-              <th style={{ padding: "0.5rem", textAlign: "right" }}>Actions</th>
+            <tr>
+              <th>Trigger</th>
+              <th>Replacement</th>
+              <th>File</th>
+              <th>Vars</th>
+              <th className="right" style={{ width: "100px" }}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ padding: "1rem", textAlign: "center", opacity: 0.7 }}>
+                <td colSpan={5} style={{ padding: "24px", textAlign: "center", color: "var(--color-text-subdued)" }}>
                   No snippets found.
                 </td>
               </tr>
             ) : (
               filtered.map((s) => (
-                <tr
-                  key={s.id}
-                  style={{
-                    borderBottom: "1px solid #333",
-                  }}
-                  className="snippet-row"
-                >
-                  <td style={{ padding: "0.5rem", fontWeight: "bold" }}>{s.trigger}</td>
+                <tr key={s.id}>
+                  <td style={{ fontWeight: 600 }}>{s.trigger}</td>
                   <td
                     style={{
-                      padding: "0.5rem",
-                      maxWidth: "200px",
+                      maxWidth: "300px",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
+                      color: "var(--color-text-subdued)",
                     }}
                   >
                     {s.replace}
                   </td>
-                  <td style={{ padding: "0.5rem", fontSize: "0.9rem", opacity: 0.8 }}>
+                  <td style={{ color: "var(--color-text-subdued)" }}>
                     {s.file_relative}
                   </td>
-                  <td style={{ padding: "0.5rem" }}>{s.vars?.length || 0}</td>
-                  <td style={{ padding: "0.5rem", textAlign: "right" }}>
+                  <td className="mono" style={{ color: "var(--color-text-placeholder)" }}>
+                    {s.vars?.length || 0}
+                  </td>
+                  <td className="right">
                     <button
                       type="button"
                       onClick={() => onEditSnippet(s)}
-                      style={{ padding: "0.25rem 0.5rem", fontSize: "0.9rem" }}
+                      className="btn btn-secondary sm"
+                      style={{ height: "30px", padding: "0 10px", fontSize: "13px" }}
                     >
+                      <I.Edit style={{ width: 12, height: 12, marginRight: "4px" }} />
                       Edit
                     </button>
                   </td>
