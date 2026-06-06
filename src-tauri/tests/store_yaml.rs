@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use openmacro_lib::store::{load_from_root, LoadResult, VarKind};
+use openmacro_lib::store::{load_from_root, LoadResult, LoggingConfig, VarKind};
 use tempfile::TempDir;
 
 fn write_yaml(root: &TempDir, relative_path: &str, contents: &str) {
@@ -324,7 +324,48 @@ fn shipped_default_yaml_loads_without_errors() {
     let result = load_from_root(&shipped_root).unwrap();
 
     assert!(result.errors.is_empty());
-    assert_eq!(result.snippets.len(), 5);
+    assert_eq!(result.snippets.len(), 6);
     assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";sig"));
     assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";head"));
+}
+
+#[test]
+fn logging_config_defaults_match_design() {
+    let cfg: LoggingConfig = serde_yaml::from_str("{}").unwrap();
+
+    assert_eq!(cfg.level, "info");
+    assert!(cfg.modules.is_empty());
+    assert!(cfg.file.enabled);
+    assert_eq!(cfg.file.max_files, 7);
+    assert!(!cfg.verbose_content);
+    assert_eq!(cfg.frontend.level, "info");
+    assert!(cfg.frontend.modules.is_empty());
+}
+
+#[test]
+fn logging_config_deserializes_overrides() {
+    let cfg: LoggingConfig = serde_yaml::from_str(
+        r#"
+level: debug
+modules:
+  openmacro::matcher: trace
+file:
+  enabled: false
+  max_files: 3
+verbose_content: true
+frontend:
+  level: warn
+  modules:
+    settings: debug
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(cfg.level, "debug");
+    assert_eq!(cfg.modules["openmacro::matcher"], "trace");
+    assert!(!cfg.file.enabled);
+    assert_eq!(cfg.file.max_files, 3);
+    assert!(cfg.verbose_content);
+    assert_eq!(cfg.frontend.level, "warn");
+    assert_eq!(cfg.frontend.modules["settings"], "debug");
 }

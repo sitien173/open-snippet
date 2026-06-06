@@ -16,6 +16,7 @@ pub mod expand;
 pub mod form;
 pub mod hook;
 pub mod inject;
+pub mod log_init;
 pub mod matcher;
 pub mod commands;
 pub mod store;
@@ -170,6 +171,7 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     crate::crash::install_panic_hook();
+    let log_handles = crate::log_init::init(&crate::store::LoggingConfig::default());
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -198,7 +200,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .setup(|app| {
+        .setup(move |app| {
             let snippets_root = crate::commands::snippets::snippets_root().map_err(setup_error)?;
             fs::create_dir_all(&snippets_root).map_err(tauri::Error::from)?;
             seed_default_snippets_if_empty(&snippets_root).map_err(setup_error)?;
@@ -226,6 +228,7 @@ pub fn run() {
             let sync_driver = crate::sync::spawn_driver(sync_state.backend(), sync_rx);
             app.manage(snippet_state);
             app.manage(prefs_state);
+            app.manage(log_handles);
             app.manage(form_runner);
             app.manage(sync_state);
             app.manage(sync_driver);
