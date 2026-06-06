@@ -54,13 +54,18 @@ None
 TASK_COMPLETE
 
 ## Review
-<!-- coordinator finalizes after Gate 3 -->
+- Spec Status: PASS
+- Quality Findings:
+  - LOW: `src/lib/logger.ts:6-21` exposes a `window.__OPENMACRO_MOCK_INVOKE` injection point for tests; pragmatic, non-blocking.
+- Final Status: PASS
+- Explanation: 36 frontend tests pass; lint + build clean; no `console.*` calls remain in the four migrated files.
 
 ## Squash Commit
-<!-- final squash subject after Review PASS -->
+- 77768c3  phase-3: frontend logger module + console migration
 
 ## Decisions
-<!-- cross-task / phase-level decisions; per-task decisions go in notes.md -->
+- Frontend `verbose_content` is sourced from `VITE_LOG_VERBOSE === "1"` env only — IPC `LoggingFrontendConfig` does not currently expose it (acceptable for "opt-in verbose, dev only").
+- Tests inject `invoke` via `window.__OPENMACRO_MOCK_INVOKE` rather than `vi.mock('@tauri-apps/api/core')`. Minor test-only surface in production code.
 
 ## Handoff
-<!-- what Phase 4 must do -->
+- Phase 4 (gemini, front): `/logs` route consuming `invoke("get_log_ring", { sinceSeq })` (returns Vec<LogEntry> Rust-side shape) merged with `getRing()` from `src/lib/logger.ts` (returns the frontend LogEntry shape). Different field names per side — viewer normalizes both into a UI row type. Add `@tanstack/react-virtual` if not already a dep.
