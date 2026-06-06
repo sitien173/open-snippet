@@ -87,6 +87,10 @@ impl Store {
     }
 }
 
+pub fn watch_root(root: PathBuf) -> notify::Result<Store> {
+    Store::spawn(root)
+}
+
 impl Drop for Store {
     fn drop(&mut self) {
         let _ = self.trigger_tx.send(Trigger::Shutdown);

@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::fs;
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -16,6 +13,7 @@ pub mod form;
 pub mod hook;
 pub mod inject;
 pub mod matcher;
+pub mod commands;
 pub mod store;
 pub mod sync;
 
@@ -38,16 +36,15 @@ fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn snippets_dir_from_appdata(appdata_dir: &Path) -> PathBuf {
-    appdata_dir.join("openmacro").join("snippets")
+fn setup_error(message: impl Into<String>) -> tauri::Error {
+    let boxed: Box<dyn std::error::Error> = Box::new(std::io::Error::other(message.into()));
+    tauri::Error::Setup(boxed.into())
 }
 
 fn open_snippets_folder<R: Runtime>(app: &AppHandle<R>) {
-    let Some(appdata_dir) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+    let Ok(snippets_dir) = crate::commands::snippets::snippets_root() else {
         return;
     };
-
-    let snippets_dir = snippets_dir_from_appdata(&appdata_dir);
     if fs::create_dir_all(&snippets_dir).is_ok() {
         let _ = app
             .opener()
@@ -130,6 +127,14 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            crate::commands::snippets::list_snippets,
+            crate::commands::snippets::save_snippet,
+            crate::commands::snippets::reload_snippets,
+            crate::commands::snippets::list_load_errors,
+            crate::commands::prefs::get_prefs,
+            crate::commands::prefs::set_prefs
+        ])
         .plugin(
             tauri_plugin_single_instance::Builder::new()
                 .windows_mutex_name(SINGLE_INSTANCE_MUTEX)
@@ -143,6 +148,26 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let snippets_root = crate::commands::snippets::snippets_root().map_err(setup_error)?;
+            fs::create_dir_all(&snippets_root).map_err(tauri::Error::from)?;
+            let snippet_state = crate::commands::snippets::SnippetStoreState::load(snippets_root.clone())
+                .map_err(setup_error)?;
+            let watcher = crate::store::watch_root(snippets_root).map_err(|error| setup_error(error.to_string()))?;
+            let mut rx = watcher.subscribe();
+            let snapshot_handle = snippet_state.snapshot_handle();
+            tauri::async_runtime::spawn(async move {
+                while rx.changed().await.is_ok() {
+                    let next = rx.borrow().clone();
+                    let mut snapshot = snapshot_handle.write().unwrap();
+                    snapshot.revision = next.revision;
+                    snapshot.snippets = next.snippets.clone();
+                    snapshot.errors = next.errors.clone();
+                }
+            });
+            snippet_state.set_watcher(watcher);
+            let prefs_state = crate::commands::prefs::load_prefs_state().map_err(setup_error)?;
+            app.manage(snippet_state);
+            app.manage(prefs_state);
             let engine_handle = crate::engine::start_runtime();
             app.manage(engine_handle);
             build_tray(app.handle())?;
@@ -162,7 +187,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn single_instance_mutex_name_matches_spec() {
@@ -172,8 +197,22 @@ mod tests {
     #[test]
     fn snippets_dir_path_matches_spec() {
         assert_eq!(
-            super::snippets_dir_from_appdata(Path::new(r"C:\Users\me\AppData\Roaming")),
-            Path::new(r"C:\Users\me\AppData\Roaming\openmacro\snippets"),
+            PathBuf::from(r"C:\Users\me\AppData\Roaming")
+                .join("openmacro")
+                .join("snippets"),
+            PathBuf::from(r"C:\Users\me\AppData\Roaming\openmacro\snippets"),
         );
+    }
+
+    #[test]
+    fn snippets_root_prefers_env_override() {
+        std::env::set_var("OPENMACRO_SNIPPETS_ROOT", r"C:\temp\openmacro-snippets");
+
+        assert_eq!(
+            crate::commands::snippets::snippets_root().unwrap(),
+            Path::new(r"C:\temp\openmacro-snippets")
+        );
+
+        std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
     }
 }

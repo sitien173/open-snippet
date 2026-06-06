@@ -6,4 +6,4 @@ pub mod watcher;
 
 pub use loader::{load_from_root, LoadError, LoadResult};
 pub use model::{Snippet, VarDecl, VarKind};
-pub use watcher::{SnapshotInner, Store};
+pub use watcher::{watch_root, SnapshotInner, Store};
