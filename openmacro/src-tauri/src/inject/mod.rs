@@ -21,7 +21,7 @@ pub enum KeyboardAction {
     Paste(String),
 }
 
-pub trait KeyboardSink {
+pub trait KeyboardSink: Send + 'static {
     fn send(&mut self, action: KeyboardAction);
 }
 

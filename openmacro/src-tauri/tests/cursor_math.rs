@@ -37,7 +37,7 @@ fn write_yaml(root: &TempDir, relative_path: &str, contents: &str) {
 fn no_cursor_token_returns_none() {
     let mut clipboard = StubClipboard;
 
-    let resolved = Resolver::resolve(&snippet("alpha"), &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet("alpha"), &mut clipboard, None).unwrap();
 
     assert_eq!(resolved.text, "alpha");
     assert_eq!(resolved.cursor_chars_after_token, None);
@@ -47,7 +47,7 @@ fn no_cursor_token_returns_none() {
 fn single_cursor_token_uses_ascii_utf16_count() {
     let mut clipboard = StubClipboard;
 
-    let resolved = Resolver::resolve(&snippet("abc$|$def"), &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet("abc$|$def"), &mut clipboard, None).unwrap();
 
     assert_eq!(resolved.text, "abcdef");
     assert_eq!(resolved.cursor_chars_after_token, Some(3));
@@ -57,9 +57,10 @@ fn single_cursor_token_uses_ascii_utf16_count() {
 fn single_cursor_token_counts_utf16_units_after_token() {
     let mut clipboard = StubClipboard;
 
-    let resolved = Resolver::resolve(&snippet("x$|$🙂界"), &mut clipboard).unwrap();
+    let resolved =
+        Resolver::resolve(&snippet("x$|$\u{1F642}\u{754C}"), &mut clipboard, None).unwrap();
 
-    assert_eq!(resolved.text, "x🙂界");
+    assert_eq!(resolved.text, "x\u{1F642}\u{754C}");
     assert_eq!(resolved.cursor_chars_after_token, Some(3));
 }
 

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::{
     clipboard_var::{resolve_clipboard, ClipboardReader},
     datetime::resolve_datetime,
@@ -23,6 +25,7 @@ impl Resolver {
     pub fn resolve(
         snippet: &Snippet,
         clipboard_reader: &mut impl ClipboardReader,
+        form_values: Option<&BTreeMap<String, String>>,
     ) -> Result<Resolved, ResolveError> {
         let mut rendered = String::with_capacity(snippet.replace.len());
         let mut rest = snippet.replace.as_str();
@@ -35,7 +38,7 @@ impl Resolver {
             };
             let token = &after_open[..end];
             let (name, arg) = split_placeholder(token);
-            let value = resolve_placeholder(snippet, name, arg, clipboard_reader)?;
+            let value = resolve_placeholder(snippet, name, arg, clipboard_reader, form_values)?;
             rendered.push_str(&value);
             rest = &after_open[end + 2..];
         }
@@ -63,7 +66,14 @@ fn resolve_placeholder(
     name: &str,
     arg: Option<&str>,
     clipboard_reader: &mut impl ClipboardReader,
+    form_values: Option<&BTreeMap<String, String>>,
 ) -> Result<String, ResolveError> {
+    if let Some(values) = form_values {
+        if let Some(value) = values.get(name) {
+            return Ok(value.clone());
+        }
+    }
+
     if let Some(var) = snippet.vars.iter().find(|var| var.name == name) {
         return Ok(match var.kind {
             VarKind::Text

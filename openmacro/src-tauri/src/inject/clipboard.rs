@@ -37,7 +37,7 @@ impl ClipboardSnapshot {
     }
 }
 
-pub trait ClipboardBackend: ClipboardReader {
+pub trait ClipboardBackend: ClipboardReader + Send + 'static {
     fn paste(
         &mut self,
         sink: &mut dyn KeyboardSink,

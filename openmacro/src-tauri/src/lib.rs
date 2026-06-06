@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, sync::Arc};
 
 use tauri::{
     menu::{Menu, MenuItem},
@@ -132,6 +132,8 @@ pub fn run() {
             crate::commands::snippets::save_snippet,
             crate::commands::snippets::reload_snippets,
             crate::commands::snippets::list_load_errors,
+            crate::commands::form::form_submit,
+            crate::commands::form::form_cancel,
             crate::commands::prefs::get_prefs,
             crate::commands::prefs::set_prefs
         ])
@@ -166,8 +168,10 @@ pub fn run() {
             });
             snippet_state.set_watcher(watcher);
             let prefs_state = crate::commands::prefs::load_prefs_state().map_err(setup_error)?;
+            let form_runner = Arc::new(crate::form::FormRunner::new(app.handle().clone()));
             app.manage(snippet_state);
             app.manage(prefs_state);
+            app.manage(form_runner);
             let engine_handle = crate::engine::start_runtime();
             app.manage(engine_handle);
             build_tray(app.handle())?;

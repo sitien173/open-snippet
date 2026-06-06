@@ -44,7 +44,7 @@ fn resolves_builtin_datetime_placeholders() {
     let snippet = snippet("{{date}}|{{time}}|{{datetime}}", Vec::new());
     let mut clipboard = StubClipboard::default();
 
-    let resolved = Resolver::resolve(&snippet, &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet, &mut clipboard, None).unwrap();
 
     assert_eq!(
         resolved.text,
@@ -81,7 +81,7 @@ fn resolves_declared_var_kinds_before_builtin_fallbacks() {
         text: Some("copied".to_string()),
     };
 
-    let resolved = Resolver::resolve(&snippet, &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet, &mut clipboard, None).unwrap();
 
     assert_eq!(
         resolved.text,
@@ -97,7 +97,7 @@ fn resolves_strftime_arg_and_clipboard_text() {
         text: Some("copied".to_string()),
     };
 
-    let resolved = Resolver::resolve(&snippet, &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet, &mut clipboard, None).unwrap();
 
     assert_eq!(
         resolved.text,
@@ -110,7 +110,7 @@ fn missing_clipboard_text_resolves_as_empty_string() {
     let snippet = snippet("({{clipboard}})", Vec::new());
     let mut clipboard = StubClipboard::default();
 
-    let resolved = Resolver::resolve(&snippet, &mut clipboard).unwrap();
+    let resolved = Resolver::resolve(&snippet, &mut clipboard, None).unwrap();
 
     assert_eq!(resolved.text, "()");
 }
@@ -120,7 +120,7 @@ fn unknown_placeholder_is_an_error() {
     let snippet = snippet("{{missing}}", Vec::new());
     let mut clipboard = StubClipboard::default();
 
-    let error = Resolver::resolve(&snippet, &mut clipboard).unwrap_err();
+    let error = Resolver::resolve(&snippet, &mut clipboard, None).unwrap_err();
 
     assert_eq!(
         error,
