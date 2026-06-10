@@ -1,6 +1,7 @@
 //! Win32 low-level keyboard hook thread.
 
 use std::{
+    fmt,
     panic::{self, AssertUnwindSafe},
     ptr,
     sync::mpsc,
@@ -11,6 +12,34 @@ use super::{channel, HookConsumer, HookEvent, HookProducer, ResetCause, RING_CAP
 
 pub struct Hook;
 
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TranslateOutcome {
+    Char(char),
+    DeadKey,
+    None,
+}
+
+#[cfg(windows)]
+struct HklHex(windows::Win32::UI::Input::KeyboardAndMouse::HKL);
+
+#[cfg(windows)]
+impl fmt::Display for HklHex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:#x}", self.0.0 as usize)
+    }
+}
+
+#[cfg(windows)]
+struct Codepoint(char);
+
+#[cfg(windows)]
+impl fmt::Display for Codepoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "\\u{{{:04x}}}", self.0 as u32)
+    }
+}
+
 pub struct HookHandle {
     join_handle: Option<JoinHandle<()>>,
     thread_id: Option<u32>,
@@ -19,6 +48,32 @@ pub struct HookHandle {
 struct HookReady {
     thread_id: Option<u32>,
     result: Result<(), String>,
+}
+
+#[cfg(windows)]
+pub(super) fn translate_with_layout(
+    vk_code: u32,
+    scan_code: u32,
+    hkl: windows::Win32::UI::Input::KeyboardAndMouse::HKL,
+    key_state: &[u8; 256],
+) -> TranslateOutcome {
+    use windows::Win32::UI::Input::KeyboardAndMouse::ToUnicodeEx;
+
+    if hkl.0.is_null() {
+        return TranslateOutcome::None;
+    }
+
+    let mut utf16 = [0u16; 8];
+    let translated = unsafe { ToUnicodeEx(vk_code, scan_code, key_state, &mut utf16, 2, hkl) };
+
+    match translated {
+        1 => char::from_u32(utf16[0] as u32)
+            .map(TranslateOutcome::Char)
+            .unwrap_or(TranslateOutcome::None),
+        -1 => TranslateOutcome::DeadKey,
+        0 => TranslateOutcome::None,
+        _ => TranslateOutcome::None,
+    }
 }
 
 impl Hook {
@@ -87,6 +142,52 @@ impl Hook {
     }
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+    use super::{translate_with_layout, TranslateOutcome};
+    use windows::{
+        core::w,
+        Win32::UI::{
+            Input::KeyboardAndMouse::{HKL, LoadKeyboardLayoutW, KLF_NOTELLSHELL, VK_A, VK_SHIFT},
+        },
+    };
+
+    #[test]
+    fn translate_with_layout_returns_ascii_lowercase_for_vk_a() {
+        let Ok(hkl) = (unsafe { LoadKeyboardLayoutW(w!("00000409"), KLF_NOTELLSHELL) }) else {
+            return;
+        };
+
+        let key_state = [0u8; 256];
+        let outcome = translate_with_layout(VK_A.0 as u32, 0, hkl, &key_state);
+
+        assert_eq!(outcome, TranslateOutcome::Char('a'));
+    }
+
+    #[test]
+    fn translate_with_layout_returns_ascii_uppercase_for_shift_vk_a() {
+        let Ok(hkl) = (unsafe { LoadKeyboardLayoutW(w!("00000409"), KLF_NOTELLSHELL) }) else {
+            return;
+        };
+
+        let mut key_state = [0u8; 256];
+        key_state[VK_SHIFT.0 as usize] = 0x80;
+        let outcome = translate_with_layout(VK_A.0 as u32, 0, hkl, &key_state);
+
+        assert_eq!(outcome, TranslateOutcome::Char('A'));
+    }
+
+    #[test]
+    fn translate_with_layout_returns_none_for_null_layout() {
+        let key_state = [0u8; 256];
+
+        assert_eq!(
+            translate_with_layout(VK_A.0 as u32, 0, HKL(std::ptr::null_mut()), &key_state),
+            TranslateOutcome::None
+        );
+    }
+}
+
 impl Drop for HookHandle {
     fn drop(&mut self) {
         #[cfg(windows)]
@@ -118,13 +219,14 @@ fn run_hook_thread(
         Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
         UI::{
             Input::KeyboardAndMouse::{
-                GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK, VK_CAPITAL,
-                VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+                GetKeyState, GetKeyboardLayout, GetKeyboardState, VK_BACK, VK_CAPITAL, VK_LCONTROL,
+                VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
             },
             WindowsAndMessaging::{
-                CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-                UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
-                WM_KEYDOWN, WM_SYSKEYDOWN,
+                CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW,
+                GetWindowThreadProcessId, SetWindowsHookExW, TranslateMessage,
+                UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
+                WM_SYSKEYDOWN,
             },
         },
     };
@@ -176,21 +278,51 @@ fn run_hook_thread(
             key_state[VK_LMENU.0 as usize] = (GetKeyState(VK_LMENU.0 as i32) as u8) & 0x80;
             key_state[VK_RMENU.0 as usize] = (GetKeyState(VK_RMENU.0 as i32) as u8) & 0x80;
 
-            let mut utf16 = [0u16; 8];
-            // SAFETY: fixed buffers are stack-allocated and valid for the duration of the call.
-            let translated = ToUnicodeEx(
-                vk_code,
-                scan_code,
-                &key_state,
-                &mut utf16,
-                0,
-                GetKeyboardLayout(0),
-            );
-
-            if translated == 1 {
-                char::from_u32(utf16[0] as u32)
+            let hwnd = GetForegroundWindow();
+            let hkl = if hwnd.0.is_null() {
+                GetKeyboardLayout(0)
             } else {
-                None
+                let thread_id = GetWindowThreadProcessId(hwnd, None);
+                if thread_id == 0 {
+                    GetKeyboardLayout(0)
+                } else {
+                    GetKeyboardLayout(thread_id)
+                }
+            };
+
+            let outcome = translate_with_layout(vk_code, scan_code, hkl, &key_state);
+            match outcome {
+                TranslateOutcome::Char(ch) => {
+                    tracing::trace!(
+                        vk_code,
+                        scan_code,
+                        hkl = %HklHex(hkl),
+                        outcome = "char",
+                        codepoint = %Codepoint(ch),
+                        "translated key"
+                    );
+                    Some(ch)
+                }
+                TranslateOutcome::DeadKey => {
+                    tracing::trace!(
+                        vk_code,
+                        scan_code,
+                        hkl = %HklHex(hkl),
+                        outcome = "dead",
+                        "translated key"
+                    );
+                    None
+                }
+                TranslateOutcome::None => {
+                    tracing::trace!(
+                        vk_code,
+                        scan_code,
+                        hkl = %HklHex(hkl),
+                        outcome = "none",
+                        "translated key"
+                    );
+                    None
+                }
             }
         }
     }
