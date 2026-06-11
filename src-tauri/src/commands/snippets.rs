@@ -49,6 +49,13 @@ pub struct ReloadResult {
     pub errors: Vec<LoadErrorDto>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StoreSettingsDto {
+    pub trigger_prefix: String,
+    pub expand_mode: crate::store::ExpandMode,
+    pub expand_mode_missing: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct SnippetStoreSnapshot {
     pub revision: u64,
@@ -175,8 +182,32 @@ pub fn list_load_errors(state: tauri::State<'_, SnippetStoreState>) -> Vec<LoadE
 #[tracing::instrument(skip(state))]
 pub fn get_store_settings(
     state: tauri::State<'_, SnippetStoreState>,
-) -> Result<StoreSettings, String> {
-    get_store_settings_inner(state.inner())
+) -> Result<StoreSettingsDto, String> {
+    get_store_settings_dto_inner(state.inner())
+}
+
+pub fn get_store_settings_dto_inner(state: &SnippetStoreState) -> Result<StoreSettingsDto, String> {
+    let settings = get_store_settings_inner(state)?;
+    let path = settings_path(state.root());
+    let expand_mode_missing = if path.exists() {
+        if let Ok(contents) = fs::read_to_string(&path) {
+            if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&contents) {
+                value.get("expand_mode").is_none()
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    Ok(StoreSettingsDto {
+        trigger_prefix: settings.trigger_prefix,
+        expand_mode: settings.expand_mode,
+        expand_mode_missing,
+    })
 }
 
 #[tauri::command]

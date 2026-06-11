@@ -337,7 +337,7 @@ describe("SnippetEditor", () => {
 
     // Wait for set_store_settings call
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("set_store_settings", { settings: { trigger_prefix: "!!" } });
+      expect(mockInvoke).toHaveBeenCalledWith("set_store_settings", { settings: { trigger_prefix: "!!", expand_mode: "manual" } });
     });
 
     // Switch back to snippets tab

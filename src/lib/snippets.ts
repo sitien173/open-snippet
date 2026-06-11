@@ -33,8 +33,12 @@ export type SaveSnippetDto = {
   vars: VarDecl[];
 };
 
+export type ExpandMode = "manual" | "auto";
+
 export type StoreSettings = {
   trigger_prefix: string;
+  expand_mode: ExpandMode;
+  expand_mode_missing?: boolean;
 };
 
 export type LoadErrorDto = {

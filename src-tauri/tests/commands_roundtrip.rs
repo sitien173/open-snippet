@@ -5,9 +5,9 @@ use std::{
 
 use openmacro_lib::{
     commands::snippets::{
-        get_store_settings_inner, list_load_errors_inner, list_snippets_inner,
-        load_snippet_store_state, reload_snippets_inner, save_snippet_inner,
-        set_store_settings_inner, SaveSnippetDto,
+        get_store_settings_dto_inner, get_store_settings_inner, list_load_errors_inner,
+        list_snippets_inner, load_snippet_store_state, reload_snippets_inner, save_snippet_inner,
+        set_store_settings_inner, SaveSnippetDto, StoreSettingsDto,
     },
     store::{StoreSettings, VarDecl, VarKind},
 };
@@ -302,5 +302,34 @@ snippets:
     assert!(fs::read_to_string(root.path().join("_settings.yaml"))
         .unwrap()
         .contains("expand_mode: auto"));
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn test_get_store_settings_dto_migration() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+
+    // 1. Fresh install: settings file does not exist.
+    // get_store_settings should return expand_mode_missing: false
+    let state = load_snippet_store_state().unwrap();
+    let settings = get_store_settings_dto_inner(&state).unwrap();
+    assert_eq!(settings.expand_mode_missing, false);
+
+    // 2. Upgrade: settings file exists but lacks expand_mode.
+    write_yaml(&root, "_settings.yaml", "trigger_prefix: ':'\n");
+    let settings = get_store_settings_dto_inner(&state).unwrap();
+    assert_eq!(settings.expand_mode_missing, true);
+
+    // 3. Saved settings: settings file exists and contains expand_mode.
+    write_yaml(
+        &root,
+        "_settings.yaml",
+        "trigger_prefix: ':'\nexpand_mode: manual\n",
+    );
+    let settings = get_store_settings_dto_inner(&state).unwrap();
+    assert_eq!(settings.expand_mode_missing, false);
+
     std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
 }

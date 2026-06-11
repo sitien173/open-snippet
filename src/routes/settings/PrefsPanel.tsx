@@ -22,6 +22,7 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
   const [showShellConsentDialog, setShowShellConsentDialog] = useState(false);
   const [prefixInput, setPrefixInput] = useState("");
   const [prefixError, setPrefixError] = useState<string | null>(null);
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
 
   useEffect(() => {
     Promise.all([getPrefs(), getStoreSettings()])
@@ -61,7 +62,10 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
     setPrefixSaveStatus("Saving...");
     setPrefixError(null);
     try {
-      const updated = { trigger_prefix: prefixInput };
+      const updated: StoreSettings = {
+        trigger_prefix: prefixInput,
+        expand_mode: storeSettings.expand_mode || "manual",
+      };
       await setStoreSettings(updated);
       setStoreSettingsState(updated);
       setPrefixSaveStatus("Saved");
@@ -76,6 +80,36 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
       // Rollback to actual state
       setPrefixInput(storeSettings.trigger_prefix);
       log.error("Failed to persist trigger prefix", { error: err });
+    }
+  };
+
+  const handleExpandModeChange = async (mode: "manual" | "auto") => {
+    if (!storeSettings) return;
+    const updated: StoreSettings = {
+      trigger_prefix: storeSettings.trigger_prefix,
+      expand_mode: mode,
+    };
+    try {
+      await setStoreSettings(updated);
+      setStoreSettingsState(updated);
+      setNoticeDismissed(true);
+    } catch (err) {
+      log.error("Failed to save expand mode", { error: err });
+    }
+  };
+
+  const handleDismissMigrationNotice = async () => {
+    if (!storeSettings) return;
+    const updated: StoreSettings = {
+      trigger_prefix: storeSettings.trigger_prefix,
+      expand_mode: storeSettings.expand_mode || "manual",
+    };
+    try {
+      await setStoreSettings(updated);
+      setStoreSettingsState(updated);
+      setNoticeDismissed(true);
+    } catch (err) {
+      log.error("Failed to dismiss migration notice", { error: err });
     }
   };
 
@@ -137,6 +171,33 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
             )}
           </div>
         </div>
+
+        {storeSettings.expand_mode_missing && !noticeDismissed && (
+          <div className="warning-card" style={{ background: "var(--color-decorative-blue)", borderColor: "var(--color-border-blue)", marginBottom: "24px" }}>
+            <div className="ico" style={{ color: "var(--color-icon-blue)" }}>
+              <I.Info style={{ width: "20px", height: "20px" }} />
+            </div>
+            <div className="body" style={{ color: "var(--color-icon-blue)", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+              <span>Snippets now expand on Tab/Enter. Change this in Settings.</span>
+              <button
+                type="button"
+                aria-label="dismiss migration notice"
+                onClick={handleDismissMigrationNotice}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-icon-blue)",
+                  padding: "4px",
+                  display: "flex",
+                  alignItems: "center"
+                }}
+              >
+                <I.X style={{ width: "16px", height: "16px" }} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="panel" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
           <div className="field" style={{ marginBottom: 0 }}>
@@ -210,6 +271,39 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
             />
             <span className="help">
               The maximum characters a snippet is allowed to expand into (safety limit).
+            </span>
+          </div>
+
+          <div className="field" style={{ borderTop: "1px solid var(--color-border-subdued)", paddingTop: "16px", marginBottom: 0 }}>
+            <label style={{ fontWeight: 500 }}>Expand mode</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  id="expand-mode-manual"
+                  type="radio"
+                  name="expand_mode"
+                  value="manual"
+                  checked={storeSettings.expand_mode === "manual"}
+                  onChange={() => handleExpandModeChange("manual")}
+                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                <label htmlFor="expand-mode-manual" style={{ cursor: "pointer" }}>Manual</label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  id="expand-mode-auto"
+                  type="radio"
+                  name="expand_mode"
+                  value="auto"
+                  checked={storeSettings.expand_mode === "auto"}
+                  onChange={() => handleExpandModeChange("auto")}
+                  style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                />
+                <label htmlFor="expand-mode-auto" style={{ cursor: "pointer" }}>Auto</label>
+              </div>
+            </div>
+            <span className="help">
+              Controls when snippets expand. Manual mode requires pressing Tab or Enter.
             </span>
           </div>
 
