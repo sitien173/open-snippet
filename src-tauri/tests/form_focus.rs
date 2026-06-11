@@ -95,18 +95,21 @@ async fn restore_is_called_with_captured_value_on_submit() {
     let focus = MockFocusBackend::with_capture(ForegroundWindow(77));
     let window_sink = MockWindowSink::default();
     let runner = Arc::new(FormRunner::new_with_sink(window_sink.clone()));
-    let snippet = snippet("{{name}}", vec![VarDecl {
-        name: "name".to_string(),
-        kind: VarKind::Form,
-        label: Some("Name".to_string()),
-        default: None,
-        required: true,
-        options: Vec::new(),
-        format: None,
-        cmd: Vec::new(),
-        timeout_ms: None,
-        confirm: false,
-    }]);
+    let snippet = snippet(
+        "{{name}}",
+        vec![VarDecl {
+            name: "name".to_string(),
+            kind: VarKind::Form,
+            label: Some("Name".to_string()),
+            default: None,
+            required: true,
+            options: Vec::new(),
+            format: None,
+            cmd: Vec::new(),
+            timeout_ms: None,
+            confirm: false,
+        }],
+    );
     let runner_task = {
         let runner = Arc::clone(&runner);
         let snippet = snippet.clone();
@@ -130,18 +133,21 @@ async fn restore_is_called_with_captured_value_on_submit() {
 async fn restore_is_not_called_on_cancel() {
     let focus = MockFocusBackend::with_capture(ForegroundWindow(11));
     let runner = Arc::new(FormRunner::new_with_sink(MockWindowSink::default()));
-    let snippet = snippet("{{name}}", vec![VarDecl {
-        name: "name".to_string(),
-        kind: VarKind::Form,
-        label: Some("Name".to_string()),
-        default: None,
-        required: true,
-        options: Vec::new(),
-        format: None,
-        cmd: Vec::new(),
-        timeout_ms: None,
-        confirm: false,
-    }]);
+    let snippet = snippet(
+        "{{name}}",
+        vec![VarDecl {
+            name: "name".to_string(),
+            kind: VarKind::Form,
+            label: Some("Name".to_string()),
+            default: None,
+            required: true,
+            options: Vec::new(),
+            format: None,
+            cmd: Vec::new(),
+            timeout_ms: None,
+            confirm: false,
+        }],
+    );
     let runner_task = {
         let runner = Arc::clone(&runner);
         let snippet = snippet.clone();
@@ -160,18 +166,21 @@ async fn restore_is_not_called_on_cancel() {
 #[tokio::test(flavor = "current_thread")]
 async fn reentrancy_rejects_second_run() {
     let runner = Arc::new(FormRunner::new_with_sink(MockWindowSink::default()));
-    let snippet = snippet("{{name}}", vec![VarDecl {
-        name: "name".to_string(),
-        kind: VarKind::Form,
-        label: Some("Name".to_string()),
-        default: None,
-        required: true,
-        options: Vec::new(),
-        format: None,
-        cmd: Vec::new(),
-        timeout_ms: None,
-        confirm: false,
-    }]);
+    let snippet = snippet(
+        "{{name}}",
+        vec![VarDecl {
+            name: "name".to_string(),
+            kind: VarKind::Form,
+            label: Some("Name".to_string()),
+            default: None,
+            required: true,
+            options: Vec::new(),
+            format: None,
+            cmd: Vec::new(),
+            timeout_ms: None,
+            confirm: false,
+        }],
+    );
 
     let first = {
         let runner = Arc::clone(&runner);

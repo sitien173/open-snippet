@@ -22,9 +22,14 @@ pub fn install_panic_hook() {
         let report = PanicDumpReport {
             timestamp_secs: current_timestamp_secs(),
             thread_name: thread::current().name().map(str::to_string),
-            location: info
-                .location()
-                .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column())),
+            location: info.location().map(|location| {
+                format!(
+                    "{}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                )
+            }),
             payload: payload_from_hook(info),
             backtrace: Backtrace::force_capture().to_string(),
             context: Some("panic hook".to_string()),
@@ -108,7 +113,9 @@ pub fn current_timestamp_secs() -> u64 {
 }
 
 fn system_time_to_secs(time: SystemTime) -> Option<u64> {
-    time.duration_since(UNIX_EPOCH).ok().map(|value| value.as_secs())
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|value| value.as_secs())
 }
 
 fn payload_from_hook(info: &std::panic::PanicHookInfo<'_>) -> String {

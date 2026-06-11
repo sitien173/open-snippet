@@ -6,6 +6,6 @@ mod datetime;
 mod resolver;
 pub mod shell;
 
-pub use cursor::{strip_cursor_token, CursorTokenError};
 pub use clipboard_var::ClipboardReader;
+pub use cursor::{strip_cursor_token, CursorTokenError};
 pub use resolver::{ResolveError, ResolveNotifySink, Resolved, Resolver};

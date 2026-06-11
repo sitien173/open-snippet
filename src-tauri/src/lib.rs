@@ -10,6 +10,7 @@ use tauri_plugin_opener::OpenerExt;
 
 const DEFAULT_SNIPPETS_YAML: &str = include_str!("../../snippets/default.yaml");
 
+pub mod commands;
 pub mod crash;
 pub mod engine;
 pub mod expand;
@@ -18,7 +19,6 @@ pub mod hook;
 pub mod inject;
 pub mod log_init;
 pub mod matcher;
-pub mod commands;
 pub mod store;
 pub mod sync;
 
@@ -97,10 +97,20 @@ fn notify_if_recovered_from_crash<R: Runtime>(
 }
 
 fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let pause_resume =
-        MenuItem::with_id(app, PAUSE_RESUME_MENU_ID, "Pause/Resume", true, None::<&str>)?;
-    let reload_snippets =
-        MenuItem::with_id(app, RELOAD_SNIPPETS_MENU_ID, "Reload snippets", true, None::<&str>)?;
+    let pause_resume = MenuItem::with_id(
+        app,
+        PAUSE_RESUME_MENU_ID,
+        "Pause/Resume",
+        true,
+        None::<&str>,
+    )?;
+    let reload_snippets = MenuItem::with_id(
+        app,
+        RELOAD_SNIPPETS_MENU_ID,
+        "Reload snippets",
+        true,
+        None::<&str>,
+    )?;
     let open_snippets_folder_item = MenuItem::with_id(
         app,
         OPEN_SNIPPETS_FOLDER_MENU_ID,
@@ -108,8 +118,13 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
-    let open_settings =
-        MenuItem::with_id(app, OPEN_SETTINGS_MENU_ID, "Open settings", true, None::<&str>)?;
+    let open_settings = MenuItem::with_id(
+        app,
+        OPEN_SETTINGS_MENU_ID,
+        "Open settings",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ID, "Quit", true, None::<&str>)?;
 
     let pause_resume_id = pause_resume.id().clone();
@@ -130,7 +145,11 @@ fn build_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     )?;
 
     let tray = TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().cloned().expect("default window icon"))
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .expect("default window icon"),
+        )
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
@@ -207,9 +226,11 @@ pub fn run() {
             let snippets_root = crate::commands::snippets::snippets_root().map_err(setup_error)?;
             fs::create_dir_all(&snippets_root).map_err(tauri::Error::from)?;
             seed_default_snippets_if_empty(&snippets_root).map_err(setup_error)?;
-            let snippet_state = crate::commands::snippets::SnippetStoreState::load(snippets_root.clone())
-                .map_err(setup_error)?;
-            let watcher = crate::store::watch_root(snippets_root).map_err(|error| setup_error(error.to_string()))?;
+            let snippet_state =
+                crate::commands::snippets::SnippetStoreState::load(snippets_root.clone())
+                    .map_err(setup_error)?;
+            let watcher = crate::store::watch_root(snippets_root)
+                .map_err(|error| setup_error(error.to_string()))?;
             let mut rx = watcher.subscribe();
             let sync_rx = watcher.subscribe();
             let engine_rx = watcher.subscribe();
@@ -229,8 +250,9 @@ pub fn run() {
             notify_if_recovered_from_crash(app.handle(), &prefs_state).map_err(setup_error)?;
             let form_runner = Arc::new(crate::form::FormRunner::new(app.handle().clone()));
             let runtime_form_runner = Arc::clone(&form_runner);
-            let sync_state =
-                crate::commands::sync::SyncCommandState::new(crate::commands::sync::sync_root().map_err(setup_error)?);
+            let sync_state = crate::commands::sync::SyncCommandState::new(
+                crate::commands::sync::sync_root().map_err(setup_error)?,
+            );
             let sync_driver = crate::sync::spawn_driver(sync_state.backend(), sync_rx);
             let engine_handle = crate::engine::start_runtime(
                 engine_rx,
@@ -264,7 +286,10 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::{Path, PathBuf}};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
     use tempfile::TempDir;
 
     #[test]
@@ -304,6 +329,9 @@ mod tests {
         assert!(contents.contains(";sig"));
         fs::write(root.path().join("custom.yaml"), "user").unwrap();
         super::seed_default_snippets_if_empty(root.path()).unwrap();
-        assert_eq!(fs::read_to_string(root.path().join("custom.yaml")).unwrap(), "user");
+        assert_eq!(
+            fs::read_to_string(root.path().join("custom.yaml")).unwrap(),
+            "user"
+        );
     }
 }

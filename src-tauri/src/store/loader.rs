@@ -20,15 +20,42 @@ pub struct LoadResult {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadError {
-    Io { path: PathBuf, message: String },
-    Parse { path: PathBuf, message: String },
-    MissingVersion { path: PathBuf },
-    UnsupportedVersion { path: PathBuf, version: u32 },
-    RelativePath { path: PathBuf },
-    DuplicateTrigger { path: PathBuf, trigger: String },
-    TooManyCursorTokens { path: PathBuf, trigger: String },
-    ShellCmdNotArray { path: PathBuf, trigger: String, name: String },
-    ShellTimeoutInvalid { path: PathBuf, trigger: String, name: String },
+    Io {
+        path: PathBuf,
+        message: String,
+    },
+    Parse {
+        path: PathBuf,
+        message: String,
+    },
+    MissingVersion {
+        path: PathBuf,
+    },
+    UnsupportedVersion {
+        path: PathBuf,
+        version: u32,
+    },
+    RelativePath {
+        path: PathBuf,
+    },
+    DuplicateTrigger {
+        path: PathBuf,
+        trigger: String,
+    },
+    TooManyCursorTokens {
+        path: PathBuf,
+        trigger: String,
+    },
+    ShellCmdNotArray {
+        path: PathBuf,
+        trigger: String,
+        name: String,
+    },
+    ShellTimeoutInvalid {
+        path: PathBuf,
+        trigger: String,
+        name: String,
+    },
 }
 
 impl LoadError {
@@ -59,10 +86,14 @@ impl LoadError {
                 format!("too many cursor tokens in snippet: {trigger}")
             }
             Self::ShellCmdNotArray { trigger, name, .. } => {
-                format!("shell var `{name}` in snippet `{trigger}` must declare a non-empty cmd array")
+                format!(
+                    "shell var `{name}` in snippet `{trigger}` must declare a non-empty cmd array"
+                )
             }
             Self::ShellTimeoutInvalid { trigger, name, .. } => {
-                format!("shell var `{name}` in snippet `{trigger}` must declare timeout_ms <= 10000")
+                format!(
+                    "shell var `{name}` in snippet `{trigger}` must declare timeout_ms <= 10000"
+                )
             }
         }
     }
@@ -127,16 +158,15 @@ fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
         message: error.to_string(),
     })?;
 
-    let document: RootDocument = serde_yaml::from_str(&contents).map_err(|error| LoadError::Parse {
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    })?;
-
-    let version = document
-        .version
-        .ok_or_else(|| LoadError::MissingVersion {
+    let document: RootDocument =
+        serde_yaml::from_str(&contents).map_err(|error| LoadError::Parse {
             path: path.to_path_buf(),
+            message: error.to_string(),
         })?;
+
+    let version = document.version.ok_or_else(|| LoadError::MissingVersion {
+        path: path.to_path_buf(),
+    })?;
 
     if version != 1 {
         return Err(LoadError::UnsupportedVersion {
@@ -145,9 +175,11 @@ fn load_file(root: &Path, path: &Path) -> Result<Vec<Snippet>, LoadError> {
         });
     }
 
-    let relative_path = path.strip_prefix(root).map_err(|_| LoadError::RelativePath {
-        path: path.to_path_buf(),
-    })?;
+    let relative_path = path
+        .strip_prefix(root)
+        .map_err(|_| LoadError::RelativePath {
+            path: path.to_path_buf(),
+        })?;
     let relative_path = normalize_relative_path(relative_path);
 
     let mut seen_triggers = HashSet::new();

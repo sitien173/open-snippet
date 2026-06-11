@@ -23,14 +23,19 @@ fn seed_remote() -> (TempDir, String) {
     write_file(&seed, "shared.txt", "seed\n");
 
     let mut index = repo.index().unwrap();
-    index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let sig = git2::Signature::now("openmacro", "openmacro@example.com").unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[]).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+        .unwrap();
     let mut remote = repo.remote("origin", bare.to_str().unwrap()).unwrap();
-    remote.push(&["refs/heads/master:refs/heads/master"], None).unwrap();
+    remote
+        .push(&["refs/heads/master:refs/heads/master"], None)
+        .unwrap();
     drop(bare_repo);
 
     (root, bare.to_string_lossy().into_owned())

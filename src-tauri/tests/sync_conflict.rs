@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use openmacro_lib::{
     commands::sync::{sync_init_inner, sync_tick_now_inner, SyncCommandState},
@@ -34,14 +38,19 @@ fn seed_remote() -> (TempDir, String) {
     write_file(&seed, "shared.txt", "line\n");
 
     let mut index = repo.index().unwrap();
-    index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+        .unwrap();
     index.write().unwrap();
     let tree_id = index.write_tree().unwrap();
     let tree = repo.find_tree(tree_id).unwrap();
     let sig = git2::Signature::now("openmacro", "openmacro@example.com").unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[]).unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "seed", &tree, &[])
+        .unwrap();
     let mut remote = repo.remote("origin", bare.to_str().unwrap()).unwrap();
-    remote.push(&["refs/heads/master:refs/heads/master"], None).unwrap();
+    remote
+        .push(&["refs/heads/master:refs/heads/master"], None)
+        .unwrap();
 
     (root, bare.to_string_lossy().into_owned())
 }
@@ -63,7 +72,10 @@ fn conflict_tick_captures_files_under_conflict_dir_and_notifies() {
     );
     let state_b = SyncCommandState::new_for_tests(
         client_b.path().to_path_buf(),
-        Arc::new(GitBackend::new(Arc::new(WindowsCredentialStore), notify.clone())),
+        Arc::new(GitBackend::new(
+            Arc::new(WindowsCredentialStore),
+            notify.clone(),
+        )),
         Arc::new(WindowsCredentialStore),
     );
 
@@ -80,7 +92,9 @@ fn conflict_tick_captures_files_under_conflict_dir_and_notifies() {
     };
 
     assert!(dir.starts_with(client_b.path()));
-    assert!(dir.components().any(|component| component.as_os_str() == ".conflicts"));
+    assert!(dir
+        .components()
+        .any(|component| component.as_os_str() == ".conflicts"));
     assert!(dir.join("shared.txt").exists());
     assert_eq!(notify.conflicts.lock().unwrap().as_slice(), &[dir]);
 }

@@ -95,7 +95,11 @@ fn shell_var(confirm: bool) -> VarDecl {
         required: false,
         options: Vec::new(),
         format: None,
-        cmd: vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+        cmd: vec![
+            "cmd".to_string(),
+            "/c".to_string(),
+            "echo hello".to_string(),
+        ],
         timeout_ms: Some(250),
         confirm,
     }
@@ -167,7 +171,11 @@ fn resolver_confirm_false_blocks_shell_execution() {
         vec![(
             "test::;shell".to_string(),
             "out".to_string(),
-            vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+            vec![
+                "cmd".to_string(),
+                "/c".to_string(),
+                "echo hello".to_string()
+            ],
         )]
     );
     assert!(backend.calls().is_empty());
@@ -194,7 +202,11 @@ fn resolver_runs_shell_with_snippet_parent_as_cwd() {
     assert_eq!(
         backend.calls(),
         vec![(
-            vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+            vec![
+                "cmd".to_string(),
+                "/c".to_string(),
+                "echo hello".to_string()
+            ],
             PathBuf::from(r"F:\projects_new\textblaze\openmacro\snippets"),
             Duration::from_millis(250),
         )]

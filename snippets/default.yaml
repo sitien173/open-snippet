@@ -57,3 +57,6 @@ snippets:
 - trigger: :test
   replace: Tien Ngo Test
   vars: []
+- trigger: ;test
+  replace: TienNgo
+  vars: []

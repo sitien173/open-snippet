@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, sync::{Arc, RwLock}};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;

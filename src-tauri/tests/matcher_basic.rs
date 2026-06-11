@@ -53,12 +53,18 @@ fn punctuation_and_whitespace_are_boundary_states() {
     let mut whitespace_buffer = MatchBuffer::new(64);
     whitespace_buffer.push_char(' ');
     whitespace_buffer.push_char(';');
-    assert_eq!(whitespace_buffer.boundary_char_state(0), BoundaryState::Whitespace);
+    assert_eq!(
+        whitespace_buffer.boundary_char_state(0),
+        BoundaryState::Whitespace
+    );
 
     let mut punctuation_buffer = MatchBuffer::new(64);
     punctuation_buffer.push_char('(');
     punctuation_buffer.push_char(';');
-    assert_eq!(punctuation_buffer.boundary_char_state(0), BoundaryState::Punctuation);
+    assert_eq!(
+        punctuation_buffer.boundary_char_state(0),
+        BoundaryState::Punctuation
+    );
 }
 
 #[test]
@@ -88,10 +94,7 @@ fn all_reset_events_clear_the_buffer() {
 fn longest_match_wins() {
     let mut matcher = Matcher::new();
     matcher
-        .rebuild(&[
-            snippet(";sig", "short"),
-            snippet(";signature", "long"),
-        ])
+        .rebuild(&[snippet(";sig", "short"), snippet(";signature", "long")])
         .unwrap();
     let mut buffer = MatchBuffer::new(64);
     let mut hit = None;
@@ -130,7 +133,9 @@ fn backspace_pop_reverts_a_near_miss() {
     }
 
     buffer.pop_char();
-    let hit = matcher.on_char(&mut buffer, 'g').expect("expected recovered match");
+    let hit = matcher
+        .on_char(&mut buffer, 'g')
+        .expect("expected recovered match");
 
     assert_eq!(hit.snippet_id.as_ref(), "sig");
     assert_eq!(hit.trigger_len_chars, 4);

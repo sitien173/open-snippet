@@ -198,9 +198,7 @@ snippets:
             let started = Instant::now();
             fs::write(
                 &file_path,
-                format!(
-                    "version: 1\nsnippets:\n  - trigger: ;sig\n    replace: run-{iteration}\n"
-                ),
+                format!("version: 1\nsnippets:\n  - trigger: ;sig\n    replace: run-{iteration}\n"),
             )
             .unwrap();
 

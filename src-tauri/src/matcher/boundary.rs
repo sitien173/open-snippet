@@ -21,16 +21,6 @@ pub fn classify_boundary_char(ch: char) -> BoundaryState {
 fn is_unicode_punctuation(ch: char) -> bool {
     matches!(
         ch,
-        '“'
-            | '”'
-            | '‘'
-            | '’'
-            | '«'
-            | '»'
-            | '…'
-            | '–'
-            | '—'
-            | '•'
-            | '·'
+        '“' | '”' | '‘' | '’' | '«' | '»' | '…' | '–' | '—' | '•' | '·'
     )
 }
