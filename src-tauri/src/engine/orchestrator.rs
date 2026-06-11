@@ -22,7 +22,7 @@ use crate::{
     hook::{Hook, HookEvent, ResetCause},
     inject::{InjectError, InjectPlan, Injector, KeyboardSink, SUSPEND},
     matcher::{MatchBuffer, Matcher, Reset},
-    store::{Snippet, VarKind},
+    store::{ExpandMode, Snippet, StoreSettings, VarKind},
 };
 use futures_util::FutureExt;
 use tauri::{AppHandle, Runtime};
@@ -64,6 +64,7 @@ pub fn start_runtime<R: Runtime>(
     let worker = thread::spawn(move || {
         let mut orchestrator = build_orchestrator(
             snippet_rx.borrow().snippets.clone(),
+            snippet_rx.borrow().settings.clone(),
             Arc::clone(&worker_prefs),
             Arc::clone(&worker_form_runner),
             Arc::clone(&worker_focus),
@@ -82,6 +83,7 @@ pub fn start_runtime<R: Runtime>(
                 );
                 orchestrator = build_orchestrator(
                     snapshot.snippets.clone(),
+                    snapshot.settings.clone(),
                     Arc::clone(&worker_prefs),
                     Arc::clone(&worker_form_runner),
                     Arc::clone(&worker_focus),
@@ -155,6 +157,14 @@ pub struct Orchestrator<
     form_runner: Arc<FormRunner>,
     focus: Arc<dyn FocusBackend>,
     max_expansion_len: usize,
+    expand_mode: ExpandMode,
+    armed: Option<ArmedTrigger>,
+}
+
+#[derive(Debug, Clone)]
+struct ArmedTrigger {
+    snippet_id: Arc<str>,
+    trigger_len_chars: usize,
 }
 
 impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend>
@@ -195,6 +205,7 @@ impl<R: tauri::Runtime> ResolveNotifySink for AppHandle<R> {
 
 fn build_orchestrator<R: Runtime>(
     snippets: Vec<Snippet>,
+    settings: StoreSettings,
     prefs: Arc<RwLock<Prefs>>,
     form_runner: Arc<FormRunner>,
     focus: Arc<dyn FocusBackend>,
@@ -218,6 +229,7 @@ fn build_orchestrator<R: Runtime>(
     );
     let max_expansion_len = prefs.read().unwrap().max_expansion_len;
     orchestrator.set_max_expansion_len(max_expansion_len);
+    orchestrator.set_expand_mode(settings.expand_mode);
     orchestrator
 }
 
@@ -287,11 +299,18 @@ impl<
             form_runner,
             focus,
             max_expansion_len: DEFAULT_MAX_EXPANSION_LEN,
+            expand_mode: ExpandMode::Manual,
+            armed: None,
         }
     }
 
     pub fn set_max_expansion_len(&mut self, max: usize) {
         self.max_expansion_len = max;
+    }
+
+    pub fn set_expand_mode(&mut self, mode: ExpandMode) {
+        self.expand_mode = mode;
+        self.disarm();
     }
 
     pub fn handle_event(&mut self, event: HookEvent) -> Result<bool, InjectError> {
@@ -304,109 +323,44 @@ impl<
                     return Ok(false);
                 }
 
+                if self.expand_mode == ExpandMode::Manual && self.armed.is_some() {
+                    self.disarm();
+                    self.buffer.reset();
+                }
+
                 let Some(hit) = self.matcher.on_char(&mut self.buffer, ch) else {
                     return Ok(false);
                 };
 
-                let Some(snippet) = self.snippets.get(&hit.snippet_id) else {
-                    return Ok(false);
-                };
-
-                let mut injector = self.injector.lock().unwrap();
-                let prefs = self.prefs.read().unwrap().clone();
-                let resolver = Resolver::new(&prefs)
-                    .with_notify_sink(&self.notifier)
-                    .with_shell_backend(self.shell_backend.as_ref());
-                let resolved = match resolver.resolve(snippet, injector.clipboard_mut(), None) {
-                    Ok(resolved) => resolved,
-                    Err(ResolveError::UnknownPlaceholder { name }) => {
-                        self.buffer.reset();
-                        self.notifier.unknown_placeholder(&snippet.id, &name);
-                        return Ok(false);
-                    }
-                    Err(_) => return Ok(false),
-                };
-
-                if resolved.text.chars().count() > self.max_expansion_len {
-                    return Ok(false);
-                }
-
-                if snippet.vars.iter().any(|var| var.kind == VarKind::Form) {
-                    let Some(hwnd) = self.focus.capture_foreground() else {
-                        self.buffer.reset();
-                        return Ok(false);
-                    };
-                    self.buffer.reset();
-                    let snippet = snippet.clone();
-                    let injector = Arc::clone(&self.injector);
-                    let focus = Arc::clone(&self.focus);
-                    let form_runner = Arc::clone(&self.form_runner);
-                    let prefs = Arc::clone(&self.prefs);
-                    let shell_backend = Arc::clone(&self.shell_backend);
-                    let max_expansion_len = self.max_expansion_len;
-                    let notifier = Arc::new(NoopNotifySink);
-                    self.runtime.spawn(async move {
-                        let result = AssertUnwindSafe(async move {
-                            let outcome = form_runner.run(&snippet, hwnd).await;
-                            let Ok(outcome) = outcome else {
-                                return;
-                            };
-                            let FormOutcome::Submitted(values) = &outcome else {
-                                return;
-                            };
-
-                            let mut clipboard = injector.lock().unwrap();
-                            let prefs = prefs.read().unwrap().clone();
-                            let resolver = Resolver::new(&prefs)
-                                .with_notify_sink(notifier.as_ref())
-                                .with_shell_backend(shell_backend.as_ref());
-                            let Ok(resolved) =
-                                resolver.resolve(&snippet, clipboard.clipboard_mut(), Some(values))
-                            else {
-                                return;
-                            };
-                            if resolved.text.chars().count() > max_expansion_len {
-                                return;
-                            }
-                            if restore_on_submit(focus.as_ref(), hwnd, &outcome).is_err() {
-                                return;
-                            }
-                            let _ = clipboard.inject(InjectPlan {
-                                backspaces: hit.trigger_len_chars,
-                                text: resolved.text,
-                                caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
-                                max_clipboard_bytes: 4_096,
-                                clipboard_timeout: std::time::Duration::from_millis(50),
-                            });
-                        })
-                        .catch_unwind()
-                        .await;
-
-                        if let Err(payload) = result {
-                            let _ = crate::crash::write_caught_panic_dump(
-                                "form runner background task",
-                                payload.as_ref(),
-                            );
-                        }
+                if self.expand_mode == ExpandMode::Manual {
+                    self.armed = Some(ArmedTrigger {
+                        snippet_id: hit.snippet_id,
+                        trigger_len_chars: hit.trigger_len_chars,
                     });
-                    return Ok(true);
+                    crate::hook::set_confirm_armed(true);
+                    return Ok(false);
                 }
 
-                self.buffer.reset();
-                injector.inject(InjectPlan {
-                    backspaces: hit.trigger_len_chars,
-                    text: resolved.text,
-                    caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
-                    max_clipboard_bytes: 4_096,
-                    clipboard_timeout: std::time::Duration::from_millis(50),
-                })?;
-                Ok(true)
+                self.expand_trigger(&hit.snippet_id, hit.trigger_len_chars)
+            }
+            HookEvent::Confirm(_) => {
+                let Some(armed) = self.armed.clone() else {
+                    return Ok(false);
+                };
+                self.disarm();
+                self.expand_trigger(&armed.snippet_id, armed.trigger_len_chars)
             }
             HookEvent::Backspace => {
-                self.buffer.pop_char();
+                if self.armed.is_some() {
+                    self.disarm();
+                    self.buffer.reset();
+                } else {
+                    self.buffer.pop_char();
+                }
                 Ok(false)
             }
             HookEvent::Reset(cause) => {
+                self.disarm();
                 self.buffer.reset_with(map_reset(cause));
                 Ok(false)
             }
@@ -416,10 +370,120 @@ impl<
     pub fn injector(&self) -> std::sync::MutexGuard<'_, Injector<S, B>> {
         self.injector.lock().unwrap()
     }
+
+    fn disarm(&mut self) {
+        self.armed = None;
+        crate::hook::set_confirm_armed(false);
+    }
+
+    fn expand_trigger(
+        &mut self,
+        snippet_id: &Arc<str>,
+        trigger_len_chars: usize,
+    ) -> Result<bool, InjectError> {
+        let Some(snippet) = self.snippets.get(snippet_id) else {
+            return Ok(false);
+        };
+
+        let mut injector = self.injector.lock().unwrap();
+        let prefs = self.prefs.read().unwrap().clone();
+        let resolver = Resolver::new(&prefs)
+            .with_notify_sink(&self.notifier)
+            .with_shell_backend(self.shell_backend.as_ref());
+        let resolved = match resolver.resolve(snippet, injector.clipboard_mut(), None) {
+            Ok(resolved) => resolved,
+            Err(ResolveError::UnknownPlaceholder { name }) => {
+                self.buffer.reset();
+                self.notifier.unknown_placeholder(&snippet.id, &name);
+                return Ok(false);
+            }
+            Err(_) => return Ok(false),
+        };
+
+        if resolved.text.chars().count() > self.max_expansion_len {
+            return Ok(false);
+        }
+
+        if snippet.vars.iter().any(|var| var.kind == VarKind::Form) {
+            let Some(hwnd) = self.focus.capture_foreground() else {
+                self.buffer.reset();
+                return Ok(false);
+            };
+            self.buffer.reset();
+            let snippet = snippet.clone();
+            let injector = Arc::clone(&self.injector);
+            let focus = Arc::clone(&self.focus);
+            let form_runner = Arc::clone(&self.form_runner);
+            let prefs = Arc::clone(&self.prefs);
+            let shell_backend = Arc::clone(&self.shell_backend);
+            let max_expansion_len = self.max_expansion_len;
+            let notifier = Arc::new(NoopNotifySink);
+            self.runtime.spawn(async move {
+                let result = AssertUnwindSafe(async move {
+                    let outcome = form_runner.run(&snippet, hwnd).await;
+                    let Ok(outcome) = outcome else {
+                        return;
+                    };
+                    let FormOutcome::Submitted(values) = &outcome else {
+                        return;
+                    };
+
+                    let mut clipboard = injector.lock().unwrap();
+                    let prefs = prefs.read().unwrap().clone();
+                    let resolver = Resolver::new(&prefs)
+                        .with_notify_sink(notifier.as_ref())
+                        .with_shell_backend(shell_backend.as_ref());
+                    let Ok(resolved) =
+                        resolver.resolve(&snippet, clipboard.clipboard_mut(), Some(values))
+                    else {
+                        return;
+                    };
+                    if resolved.text.chars().count() > max_expansion_len {
+                        return;
+                    }
+                    if restore_on_submit(focus.as_ref(), hwnd, &outcome).is_err() {
+                        return;
+                    }
+                    let _ = clipboard.inject(InjectPlan {
+                        backspaces: trigger_len_chars,
+                        text: resolved.text,
+                        caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
+                        max_clipboard_bytes: 4_096,
+                        clipboard_timeout: std::time::Duration::from_millis(50),
+                    });
+                })
+                .catch_unwind()
+                .await;
+
+                if let Err(payload) = result {
+                    let _ = crate::crash::write_caught_panic_dump(
+                        "form runner background task",
+                        payload.as_ref(),
+                    );
+                }
+            });
+            return Ok(true);
+        }
+
+        self.buffer.reset();
+        injector.inject(InjectPlan {
+            backspaces: trigger_len_chars,
+            text: resolved.text,
+            caret_left: resolved.cursor_chars_after_token.unwrap_or(0),
+            max_clipboard_bytes: 4_096,
+            clipboard_timeout: std::time::Duration::from_millis(50),
+        })?;
+        Ok(true)
+    }
 }
 
 fn map_reset(cause: ResetCause) -> Reset {
     match cause {
+        ResetCause::ArrowKey => Reset::ArrowKey,
+        ResetCause::Home => Reset::Home,
+        ResetCause::End => Reset::End,
+        ResetCause::PageUp => Reset::PageUp,
+        ResetCause::PageDown => Reset::PageDown,
         ResetCause::ImeOrComposition => Reset::ImeCompositionStart,
         ResetCause::CapsToggle => Reset::CapsLockToggled,
         ResetCause::ForegroundChange => Reset::FocusChanged,
@@ -449,7 +513,7 @@ mod tests {
             clipboard::{MockClipboardBackend, TestClipboardBackend},
             Injector, KeyboardAction, KeyboardSink,
         },
-        store::{Snippet, VarDecl, VarKind},
+        store::{ExpandMode, Snippet, VarDecl, VarKind},
     };
 
     use super::{is_paused, set_paused, toggle_paused, NoopNotifySink, Orchestrator};
@@ -557,6 +621,15 @@ mod tests {
         }
     }
 
+    fn set_auto_mode<S, B, N>(orchestrator: &mut Orchestrator<S, B, N>)
+    where
+        S: KeyboardSink + Send + 'static,
+        B: crate::inject::clipboard::ClipboardBackend,
+        N: ResolveNotifySink,
+    {
+        orchestrator.set_expand_mode(ExpandMode::Auto);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn pause_toggle_flips_atomic_state() {
         let _guard = test_guard();
@@ -595,6 +668,7 @@ mod tests {
             injector,
             tokio::runtime::Handle::current(),
         );
+        set_auto_mode(&mut orchestrator);
         orchestrator.set_max_expansion_len(3);
 
         for ch in ";sig".chars() {
@@ -674,6 +748,7 @@ mod tests {
             injector,
             tokio::runtime::Handle::current(),
         );
+        set_auto_mode(&mut orchestrator);
 
         for ch in ";now".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
@@ -735,6 +810,7 @@ mod tests {
             Arc::new(FormRunner::new_with_sink(NoopWindowSink)),
             Arc::new(NoopFocusBackend),
         );
+        set_auto_mode(&mut orchestrator);
 
         for ch in ";oops".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
@@ -782,6 +858,7 @@ mod tests {
             prefs,
             shell_backend.clone(),
         );
+        set_auto_mode(&mut orchestrator);
 
         for ch in ";sh".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
@@ -829,6 +906,7 @@ mod tests {
             prefs,
             shell_backend.clone(),
         );
+        set_auto_mode(&mut orchestrator);
 
         for ch in ";sh".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
@@ -890,6 +968,7 @@ mod tests {
             Arc::clone(&runner),
             focus,
         );
+        set_auto_mode(&mut orchestrator);
 
         for ch in ";form".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();

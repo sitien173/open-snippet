@@ -17,6 +17,10 @@ fn default_trigger_prefix() -> String {
     ";".to_string()
 }
 
+fn default_expand_mode() -> ExpandMode {
+    ExpandMode::Manual
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snippet {
     pub id: String,
@@ -28,16 +32,26 @@ pub struct Snippet {
     pub source_file: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExpandMode {
+    Auto,
+    Manual,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoreSettings {
     #[serde(default = "default_trigger_prefix")]
     pub trigger_prefix: String,
+    #[serde(default = "default_expand_mode")]
+    pub expand_mode: ExpandMode,
 }
 
 impl Default for StoreSettings {
     fn default() -> Self {
         Self {
             trigger_prefix: default_trigger_prefix(),
+            expand_mode: default_expand_mode(),
         }
     }
 }

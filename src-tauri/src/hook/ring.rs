@@ -7,7 +7,7 @@ use std::{
 
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use super::HookEvent;
+use super::{ConfirmKey, HookEvent};
 
 pub const RING_CAPACITY: usize = 1024;
 
@@ -50,6 +50,14 @@ impl HookProducer {
                     "queued hook event"
                 ),
                 HookEvent::Backspace => tracing::debug!(kind = "backspace", "queued hook event"),
+                HookEvent::Confirm(key) => tracing::debug!(
+                    kind = "confirm",
+                    key = match key {
+                        ConfirmKey::Tab => "tab",
+                        ConfirmKey::Enter => "enter",
+                    },
+                    "queued hook event"
+                ),
                 HookEvent::Reset(cause) => {
                     tracing::debug!(kind = "reset", cause = ?cause, "queued hook event")
                 }

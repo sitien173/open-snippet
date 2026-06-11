@@ -14,13 +14,14 @@ use std::{
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::watch;
 
-use super::{load_from_root, LoadError, Snippet};
+use super::{load_from_root, LoadError, Snippet, StoreSettings};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Clone)]
 pub struct SnapshotInner {
     pub revision: u64,
+    pub settings: StoreSettings,
     pub snippets: Vec<Snippet>,
     pub errors: Vec<LoadError>,
 }
@@ -115,11 +116,13 @@ fn load_snapshot(root: &std::path::Path, revision: u64) -> SnapshotInner {
     match load_from_root(root) {
         Ok(result) => SnapshotInner {
             revision,
+            settings: result.settings,
             snippets: result.snippets,
             errors: result.errors,
         },
         Err(error) => SnapshotInner {
             revision,
+            settings: StoreSettings::default(),
             snippets: Vec::new(),
             errors: vec![LoadError::Io {
                 path: root.to_path_buf(),

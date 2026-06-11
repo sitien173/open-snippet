@@ -58,20 +58,21 @@ pub mod testing {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_sync {
+#[doc(hidden)]
+pub mod test_sync {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::DENYLISTED;
-    use crate::inject::SUSPEND;
+    use crate::{hook::set_confirm_armed, inject::SUSPEND};
 
-    pub(crate) fn global_state_guard() -> MutexGuard<'static, ()> {
+    pub fn global_state_guard() -> MutexGuard<'static, ()> {
         let guard = GLOBAL_STATE_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         DENYLISTED.store(false, std::sync::atomic::Ordering::Relaxed);
         SUSPEND.store(false, std::sync::atomic::Ordering::Relaxed);
+        set_confirm_armed(false);
         guard
     }
 

@@ -16,6 +16,7 @@ pub(crate) const SETTINGS_FILE_NAME: &str = "_settings.yaml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadResult {
+    pub settings: StoreSettings,
     pub snippets: Vec<Snippet>,
     pub errors: Vec<LoadError>,
 }
@@ -128,6 +129,7 @@ pub fn load_from_root(root: &Path) -> io::Result<LoadResult> {
         Ok(settings) => settings,
         Err(error) => {
             return Ok(LoadResult {
+                settings: StoreSettings::default(),
                 snippets: Vec::new(),
                 errors: vec![error],
             });
@@ -177,7 +179,11 @@ pub fn load_from_root(root: &Path) -> io::Result<LoadResult> {
             .collect();
     }
 
-    Ok(LoadResult { snippets, errors })
+    Ok(LoadResult {
+        settings,
+        snippets,
+        errors,
+    })
 }
 
 fn collect_yaml_files(root: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {

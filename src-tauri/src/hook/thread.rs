@@ -4,13 +4,27 @@ use std::{
     fmt,
     panic::{self, AssertUnwindSafe},
     ptr,
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
 };
 
-use super::{channel, HookConsumer, HookEvent, HookProducer, ResetCause, RING_CAPACITY};
+use super::{
+    channel, ConfirmKey, HookConsumer, HookEvent, HookProducer, ResetCause, RING_CAPACITY,
+};
 
 pub struct Hook;
+static CONFIRM_ARMED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_confirm_armed(value: bool) {
+    CONFIRM_ARMED.store(value, Ordering::Relaxed);
+}
+
+pub fn is_confirm_armed() -> bool {
+    CONFIRM_ARMED.load(Ordering::Relaxed)
+}
 
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,11 +158,16 @@ impl Hook {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::{translate_with_layout, TranslateOutcome};
+    use super::{
+        decide_keydown_event, handle_keydown_decision, is_confirm_armed, set_confirm_armed,
+        translate_with_layout, KeydownDecision, TranslateOutcome,
+    };
+    use crate::hook::channel;
+    use crate::hook::{ConfirmKey, HookEvent, ResetCause};
     use windows::{
         core::w,
         Win32::UI::Input::KeyboardAndMouse::{
-            LoadKeyboardLayoutW, KLF_NOTELLSHELL, VK_A, VK_SHIFT,
+            LoadKeyboardLayoutW, KLF_NOTELLSHELL, VK_A, VK_RETURN, VK_SHIFT, VK_TAB,
         },
     };
 
@@ -225,6 +244,215 @@ mod tests {
             "non-injected events without marker should not be ignored"
         );
     }
+
+    #[test]
+    fn confirm_keys_are_swallowed_only_when_armed() {
+        assert_eq!(
+            decide_keydown_event(VK_TAB.0 as u32, true),
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Tab))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_RETURN.0 as u32, true),
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Enter))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_TAB.0 as u32, false),
+            KeydownDecision::ForwardOnly
+        );
+        assert_eq!(
+            decide_keydown_event(VK_RETURN.0 as u32, false),
+            KeydownDecision::ForwardToTranslate
+        );
+    }
+
+    #[test]
+    fn modifier_only_keys_do_not_emit_or_disarm() {
+        assert_eq!(
+            decide_keydown_event(VK_SHIFT.0 as u32, false),
+            KeydownDecision::ForwardToTranslate
+        );
+        assert_eq!(
+            decide_keydown_event(VK_SHIFT.0 as u32, true),
+            KeydownDecision::ForwardToTranslate
+        );
+    }
+
+    #[test]
+    fn navigation_keys_emit_reset_events() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            VK_END, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR,
+        };
+
+        assert_eq!(
+            decide_keydown_event(VK_LEFT.0 as u32, false),
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::ArrowKey))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_HOME.0 as u32, false),
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::Home))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_END.0 as u32, false),
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::End))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_PRIOR.0 as u32, false),
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::PageUp))
+        );
+        assert_eq!(
+            decide_keydown_event(VK_NEXT.0 as u32, false),
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::PageDown))
+        );
+    }
+
+    #[test]
+    fn translated_char_disarms_before_later_tab_decision() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+        let (mut producer, mut consumer) = channel(4);
+        set_confirm_armed(true);
+
+        let swallowed = handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::ForwardToTranslate,
+            Some('x'),
+        );
+
+        assert!(!swallowed);
+        assert!(!is_confirm_armed());
+        assert_eq!(consumer.pop(), Some(HookEvent::Char('x')));
+        assert_eq!(
+            decide_keydown_event(VK_TAB.0 as u32, is_confirm_armed()),
+            KeydownDecision::ForwardOnly
+        );
+    }
+
+    #[test]
+    fn backspace_and_navigation_disarm_before_later_tab_decision() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+
+        for (decision, expected) in [
+            (
+                KeydownDecision::Emit(HookEvent::Backspace),
+                HookEvent::Backspace,
+            ),
+            (
+                KeydownDecision::Emit(HookEvent::Reset(ResetCause::ArrowKey)),
+                HookEvent::Reset(ResetCause::ArrowKey),
+            ),
+        ] {
+            let (mut producer, mut consumer) = channel(4);
+            set_confirm_armed(true);
+
+            let swallowed = handle_keydown_decision(&mut producer, decision, None);
+
+            assert!(!swallowed);
+            assert!(!is_confirm_armed());
+            assert_eq!(consumer.pop(), Some(expected));
+            assert_eq!(
+                decide_keydown_event(VK_TAB.0 as u32, is_confirm_armed()),
+                KeydownDecision::ForwardOnly
+            );
+        }
+    }
+
+    #[test]
+    fn modifier_only_forwarding_does_not_disarm() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+        let (mut producer, mut consumer) = channel(4);
+        set_confirm_armed(true);
+
+        let swallowed =
+            handle_keydown_decision(&mut producer, KeydownDecision::ForwardToTranslate, None);
+
+        assert!(!swallowed);
+        assert!(is_confirm_armed());
+        assert_eq!(consumer.pop(), None);
+        assert_eq!(
+            decide_keydown_event(VK_TAB.0 as u32, is_confirm_armed()),
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Tab))
+        );
+    }
+
+    #[test]
+    fn confirm_is_swallowed_only_when_queue_accepts_event() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+
+        let (mut producer, mut consumer) = channel(1);
+        set_confirm_armed(true);
+        assert!(handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Tab)),
+            None,
+        ));
+        assert_eq!(consumer.pop(), Some(HookEvent::Confirm(ConfirmKey::Tab)));
+
+        let (mut producer, mut consumer) = channel(1);
+        assert!(producer.push(HookEvent::Char('a')));
+        set_confirm_armed(true);
+        assert!(!handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Enter)),
+            None,
+        ));
+        assert_eq!(consumer.pop(), Some(HookEvent::Char('a')));
+        assert_eq!(consumer.pop(), None);
+    }
+
+    #[test]
+    fn successful_confirm_queue_clears_armed_immediately() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+        let (mut producer, mut consumer) = channel(2);
+        set_confirm_armed(true);
+
+        let swallowed = handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Tab)),
+            None,
+        );
+
+        assert!(swallowed);
+        assert!(!is_confirm_armed());
+        assert_eq!(consumer.pop(), Some(HookEvent::Confirm(ConfirmKey::Tab)));
+    }
+
+    #[test]
+    fn failed_confirm_queue_clears_armed_and_does_not_swallow() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+        let (mut producer, mut consumer) = channel(1);
+        assert!(producer.push(HookEvent::Char('a')));
+        set_confirm_armed(true);
+
+        let swallowed = handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Enter)),
+            None,
+        );
+
+        assert!(!swallowed);
+        assert!(!is_confirm_armed());
+        assert_eq!(consumer.pop(), Some(HookEvent::Char('a')));
+        assert_eq!(consumer.pop(), None);
+    }
+
+    #[test]
+    fn later_tab_decision_sees_unarmed_after_successful_confirm() {
+        let _guard = crate::hook::winevent::test_sync::global_state_guard();
+        let (mut producer, mut consumer) = channel(2);
+        set_confirm_armed(true);
+
+        assert!(handle_keydown_decision(
+            &mut producer,
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Enter)),
+            None,
+        ));
+
+        assert!(!is_confirm_armed());
+        assert_eq!(consumer.pop(), Some(HookEvent::Confirm(ConfirmKey::Enter)));
+        assert_eq!(
+            decide_keydown_event(VK_TAB.0 as u32, is_confirm_armed()),
+            KeydownDecision::ForwardOnly
+        );
+    }
 }
 
 impl Drop for HookHandle {
@@ -249,6 +477,93 @@ impl Drop for HookHandle {
 
 const LLKHF_INJECTED_FLAG: u32 = 0x10;
 
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeydownDecision {
+    ForwardOnly,
+    ForwardToTranslate,
+    Emit(HookEvent),
+    SwallowAndEmit(HookEvent),
+}
+
+#[cfg(windows)]
+fn decide_keydown_event(vk_code: u32, armed: bool) -> KeydownDecision {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        VK_BACK, VK_CAPITAL, VK_DOWN, VK_END, VK_HOME, VK_LEFT, VK_NEXT, VK_PRIOR, VK_RETURN,
+        VK_RIGHT, VK_TAB, VK_UP,
+    };
+
+    match vk_code {
+        code if code == VK_BACK.0 as u32 => KeydownDecision::Emit(HookEvent::Backspace),
+        code if code == VK_CAPITAL.0 as u32 => {
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::CapsToggle))
+        }
+        code if code == VK_LEFT.0 as u32
+            || code == VK_RIGHT.0 as u32
+            || code == VK_UP.0 as u32
+            || code == VK_DOWN.0 as u32 =>
+        {
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::ArrowKey))
+        }
+        code if code == VK_HOME.0 as u32 => {
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::Home))
+        }
+        code if code == VK_END.0 as u32 => KeydownDecision::Emit(HookEvent::Reset(ResetCause::End)),
+        code if code == VK_PRIOR.0 as u32 => {
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::PageUp))
+        }
+        code if code == VK_NEXT.0 as u32 => {
+            KeydownDecision::Emit(HookEvent::Reset(ResetCause::PageDown))
+        }
+        code if armed && code == VK_TAB.0 as u32 => {
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Tab))
+        }
+        code if armed && code == VK_RETURN.0 as u32 => {
+            KeydownDecision::SwallowAndEmit(HookEvent::Confirm(ConfirmKey::Enter))
+        }
+        code if code == VK_TAB.0 as u32 => KeydownDecision::ForwardOnly,
+        _ => KeydownDecision::ForwardToTranslate,
+    }
+}
+
+#[cfg(windows)]
+fn handle_keydown_decision(
+    producer: &mut HookProducer,
+    decision: KeydownDecision,
+    translated_char: Option<char>,
+) -> bool {
+    match decision {
+        KeydownDecision::ForwardOnly => false,
+        KeydownDecision::Emit(event) => {
+            let _ = emit_hook_event(producer, event);
+            false
+        }
+        KeydownDecision::SwallowAndEmit(event) => emit_hook_event(producer, event),
+        KeydownDecision::ForwardToTranslate => {
+            if let Some(ch) = translated_char {
+                let _ = emit_hook_event(producer, HookEvent::Char(ch));
+            }
+            false
+        }
+    }
+}
+
+#[cfg(windows)]
+fn emit_hook_event(producer: &mut HookProducer, event: HookEvent) -> bool {
+    if disarms_confirm_armed(event) {
+        set_confirm_armed(false);
+    }
+    producer.push(event)
+}
+
+#[cfg(windows)]
+fn disarms_confirm_armed(event: HookEvent) -> bool {
+    matches!(
+        event,
+        HookEvent::Char(_) | HookEvent::Confirm(_) | HookEvent::Backspace | HookEvent::Reset(_)
+    )
+}
+
 fn should_ignore_event(_suspend: bool, flags: u32, dw_extra_info: usize) -> bool {
     (flags & LLKHF_INJECTED_FLAG) != 0 && dw_extra_info == crate::inject::sendinput::INJECTED_MARKER
 }
@@ -258,14 +573,14 @@ fn run_hook_thread(
     producer: &mut HookProducer,
     signal_ready: impl FnOnce(Result<(), String>),
 ) -> windows::core::Result<()> {
-    use std::sync::atomic::{AtomicPtr, Ordering};
+    use std::sync::atomic::AtomicPtr;
 
     use windows::Win32::{
         Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
         UI::{
             Input::KeyboardAndMouse::{
-                GetKeyState, GetKeyboardLayout, GetKeyboardState, VK_BACK, VK_CAPITAL, VK_LCONTROL,
-                VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
+                GetKeyState, GetKeyboardLayout, GetKeyboardState, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
+                VK_RCONTROL, VK_RMENU, VK_RSHIFT,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW,
@@ -294,12 +609,15 @@ fn run_hook_thread(
                 if !producer_ptr.is_null() {
                     // SAFETY: callback thread stores a valid HookProducer pointer before hook install and clears it on teardown.
                     let producer = unsafe { &mut *producer_ptr };
-                    if keyboard.vkCode == VK_BACK.0 as u32 {
-                        let _ = producer.push(HookEvent::Backspace);
-                    } else if keyboard.vkCode == VK_CAPITAL.0 as u32 {
-                        let _ = producer.push(HookEvent::Reset(ResetCause::CapsToggle));
-                    } else if let Some(ch) = translate_key(keyboard.vkCode, keyboard.scanCode) {
-                        let _ = producer.push(HookEvent::Char(ch));
+                    let decision = decide_keydown_event(keyboard.vkCode, is_confirm_armed());
+                    let translated_char = match decision {
+                        KeydownDecision::ForwardToTranslate => {
+                            translate_key(keyboard.vkCode, keyboard.scanCode)
+                        }
+                        _ => None,
+                    };
+                    if handle_keydown_decision(producer, decision, translated_char) {
+                        return LRESULT(1);
                     }
                 }
             }

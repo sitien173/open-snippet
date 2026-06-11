@@ -275,7 +275,8 @@ snippets:
     assert_eq!(
         get_store_settings_inner(&state).unwrap(),
         StoreSettings {
-            trigger_prefix: ";".to_string()
+            trigger_prefix: ";".to_string(),
+            expand_mode: openmacro_lib::store::ExpandMode::Manual,
         }
     );
 
@@ -283,6 +284,7 @@ snippets:
         &state,
         StoreSettings {
             trigger_prefix: ":".to_string(),
+            expand_mode: openmacro_lib::store::ExpandMode::Auto,
         },
     )
     .unwrap();
@@ -290,11 +292,15 @@ snippets:
     assert_eq!(
         get_store_settings_inner(&state).unwrap(),
         StoreSettings {
-            trigger_prefix: ":".to_string()
+            trigger_prefix: ":".to_string(),
+            expand_mode: openmacro_lib::store::ExpandMode::Auto,
         }
     );
     assert!(fs::read_to_string(root.path().join("_settings.yaml"))
         .unwrap()
         .contains("trigger_prefix: ':'"));
+    assert!(fs::read_to_string(root.path().join("_settings.yaml"))
+        .unwrap()
+        .contains("expand_mode: auto"));
     std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
 }
