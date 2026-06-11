@@ -85,17 +85,22 @@ pub fn start_runtime<R: Runtime>(
                 );
             }
 
+            let Some(event) = consumer.wait_timeout(Duration::from_millis(25)) else {
+                continue;
+            };
+
             let max_expansion_len = worker_prefs.read().unwrap().max_expansion_len;
             orchestrator.set_max_expansion_len(max_expansion_len);
 
-            if let Some(event) = consumer.pop() {
+            if let Err(error) = orchestrator.handle_event(event) {
+                tracing::warn!(error = %error, "runtime input handling failed");
+            }
+
+            while let Some(event) = consumer.pop() {
                 if let Err(error) = orchestrator.handle_event(event) {
                     tracing::warn!(error = %error, "runtime input handling failed");
                 }
-                continue;
             }
-
-            thread::sleep(Duration::from_millis(2));
         }
     });
 
@@ -649,6 +654,7 @@ mod tests {
         for ch in ";log".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
         }
+        let year: Vec<char> = chrono::Local::now().format("%Y").to_string().chars().collect();
 
         assert_eq!(
             orchestrator.injector().sink().actions,
@@ -657,12 +663,25 @@ mod tests {
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
-                KeyboardAction::Paste(chrono::Local::now().format("%Y").to_string()),
+                KeyboardAction::Unicode(year[0]),
+                KeyboardAction::Unicode(year[1]),
+                KeyboardAction::Unicode(year[2]),
+                KeyboardAction::Unicode(year[3]),
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
-                KeyboardAction::Paste("copied tail".to_string()),
+                KeyboardAction::Unicode('c'),
+                KeyboardAction::Unicode('o'),
+                KeyboardAction::Unicode('p'),
+                KeyboardAction::Unicode('i'),
+                KeyboardAction::Unicode('e'),
+                KeyboardAction::Unicode('d'),
+                KeyboardAction::Unicode(' '),
+                KeyboardAction::Unicode('t'),
+                KeyboardAction::Unicode('a'),
+                KeyboardAction::Unicode('i'),
+                KeyboardAction::Unicode('l'),
                 KeyboardAction::LeftArrow,
                 KeyboardAction::LeftArrow,
                 KeyboardAction::LeftArrow,
@@ -782,7 +801,11 @@ mod tests {
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
                 KeyboardAction::Backspace,
-                KeyboardAction::Paste("hello".to_string()),
+                KeyboardAction::Unicode('h'),
+                KeyboardAction::Unicode('e'),
+                KeyboardAction::Unicode('l'),
+                KeyboardAction::Unicode('l'),
+                KeyboardAction::Unicode('o'),
             ]
         );
         assert_eq!(

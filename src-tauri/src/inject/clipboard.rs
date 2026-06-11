@@ -4,7 +4,7 @@ use std::{thread, time::Duration};
 
 use crate::expand::ClipboardReader;
 
-use super::{InjectError, KeyboardAction, KeyboardSink};
+use super::{InjectError, KeyboardSink};
 
 const CF_TEXT_FORMAT: u32 = 1;
 const CF_UNICODETEXT_FORMAT: u32 = 13;
@@ -72,7 +72,7 @@ impl ClipboardBackend for MockClipboardBackend {
             chars = text.chars().count(),
             "mock clipboard paste"
         );
-        sink.send(KeyboardAction::Paste(text.to_string()));
+        let _ = sink;
         Ok(())
     }
 }
@@ -127,7 +127,7 @@ impl ClipboardBackend for SystemClipboardBackend {
             let _guard = ClipboardGuard::open(timeout)?;
             clear_clipboard()?;
             set_clipboard_text_internal(text)?;
-            sink.send(KeyboardAction::Paste(text.to_string()));
+            let _ = sink;
             thread::sleep(POST_PASTE_RESTORE_DELAY);
             restore_clipboard(&snapshot)?;
             Ok(())
@@ -178,7 +178,7 @@ impl ClipboardBackend for TestClipboardBackend {
             chars = text.chars().count(),
             "test clipboard paste"
         );
-        sink.send(KeyboardAction::Paste(text.to_string()));
+        let _ = sink;
         Ok(())
     }
 }

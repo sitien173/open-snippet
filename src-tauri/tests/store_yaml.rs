@@ -60,9 +60,7 @@ snippets:
     assert!(result.snippets.is_empty());
     assert_eq!(result.errors.len(), 1);
     assert!(
-        result.errors[0]
-            .message()
-            .contains("version"),
+        result.errors[0].message().contains("version"),
         "{}",
         result.errors[0].message()
     );
@@ -87,9 +85,7 @@ snippets:
     assert!(result.snippets.is_empty());
     assert_eq!(result.errors.len(), 1);
     assert!(
-        result.errors[0]
-            .message()
-            .contains("version"),
+        result.errors[0].message().contains("version"),
         "{}",
         result.errors[0].message()
     );
@@ -192,7 +188,10 @@ snippets:
     assert_eq!(vars[5].kind, VarKind::Clipboard);
     assert_eq!(vars[6].kind, VarKind::Cursor);
     assert_eq!(vars[7].kind, VarKind::Shell);
-    assert_eq!(vars[7].cmd, vec!["cmd".to_string(), "/c".to_string(), "ver".to_string()]);
+    assert_eq!(
+        vars[7].cmd,
+        vec!["cmd".to_string(), "/c".to_string(), "ver".to_string()]
+    );
     assert_eq!(vars[7].timeout_ms, Some(1000));
     assert_eq!(vars[8].kind, VarKind::Form);
     assert!(vars[0].required);
@@ -219,9 +218,7 @@ snippets:
     assert!(result.snippets.is_empty());
     assert_eq!(result.errors.len(), 1);
     assert!(
-        result.errors[0]
-            .message()
-            .contains("duplicate"),
+        result.errors[0].message().contains("duplicate"),
         "{}",
         result.errors[0].message()
     );
@@ -250,7 +247,10 @@ snippets:
 
     assert!(result.snippets.is_empty());
     assert_eq!(result.errors.len(), 1);
-    assert!(matches!(result.errors[0], openmacro_lib::store::LoadError::Parse { .. }));
+    assert!(matches!(
+        result.errors[0],
+        openmacro_lib::store::LoadError::Parse { .. }
+    ));
 }
 
 #[test]
@@ -324,9 +324,15 @@ fn shipped_default_yaml_loads_without_errors() {
     let result = load_from_root(&shipped_root).unwrap();
 
     assert!(result.errors.is_empty());
-    assert_eq!(result.snippets.len(), 6);
-    assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";sig"));
-    assert!(result.snippets.iter().any(|snippet| snippet.trigger == ";head"));
+    assert_eq!(result.snippets.len(), 7);
+    assert!(result
+        .snippets
+        .iter()
+        .any(|snippet| snippet.trigger == ";sig"));
+    assert!(result
+        .snippets
+        .iter()
+        .any(|snippet| snippet.trigger == ";head"));
 }
 
 #[test]
