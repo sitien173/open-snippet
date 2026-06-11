@@ -3,9 +3,9 @@
 use std::{
     collections::HashMap,
     panic::AssertUnwindSafe,
-    sync::{Mutex, RwLock},
     sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    sync::{Mutex, RwLock},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -16,7 +16,9 @@ use crate::{
         shell::{NoopShellBackend, ShellBackend},
         ResolveError, ResolveNotifySink, Resolver,
     },
-    form::{restore_on_submit, FocusBackend, FormOutcome, FormRunner, NoopFocusBackend, NoopWindowSink},
+    form::{
+        restore_on_submit, FocusBackend, FormOutcome, FormRunner, NoopFocusBackend, NoopWindowSink,
+    },
     hook::{Hook, HookEvent, ResetCause},
     inject::{InjectError, InjectPlan, Injector, KeyboardSink, SUSPEND},
     matcher::{MatchBuffer, Matcher, Reset},
@@ -73,7 +75,11 @@ pub fn start_runtime<R: Runtime>(
         while worker_running.load(Ordering::Relaxed) {
             if snippet_rx.has_changed().unwrap_or(false) {
                 let snapshot = snippet_rx.borrow_and_update().clone();
-                tracing::info!(loaded = snapshot.snippets.len(), errors = snapshot.errors.len(), "rebuilding runtime matcher");
+                tracing::info!(
+                    loaded = snapshot.snippets.len(),
+                    errors = snapshot.errors.len(),
+                    "rebuilding runtime matcher"
+                );
                 orchestrator = build_orchestrator(
                     snapshot.snippets.clone(),
                     Arc::clone(&worker_prefs),
@@ -151,8 +157,14 @@ pub struct Orchestrator<
     max_expansion_len: usize,
 }
 
-impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend> Orchestrator<S, B> {
-    pub fn new(snippets: Vec<Snippet>, injector: Injector<S, B>, runtime: tokio::runtime::Handle) -> Self {
+impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend>
+    Orchestrator<S, B>
+{
+    pub fn new(
+        snippets: Vec<Snippet>,
+        injector: Injector<S, B>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         Self::new_with_state(
             snippets,
             injector,
@@ -219,8 +231,11 @@ impl Drop for EngineHandle {
     }
 }
 
-impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBackend, N: ResolveNotifySink>
-    Orchestrator<S, B, N>
+impl<
+        S: KeyboardSink + Send + 'static,
+        B: crate::inject::clipboard::ClipboardBackend,
+        N: ResolveNotifySink,
+    > Orchestrator<S, B, N>
 {
     pub fn new_with_notifier(
         snippets: Vec<Snippet>,
@@ -345,11 +360,9 @@ impl<S: KeyboardSink + Send + 'static, B: crate::inject::clipboard::ClipboardBac
                             let resolver = Resolver::new(&prefs)
                                 .with_notify_sink(notifier.as_ref())
                                 .with_shell_backend(shell_backend.as_ref());
-                            let Ok(resolved) = resolver.resolve(
-                                &snippet,
-                                clipboard.clipboard_mut(),
-                                Some(values),
-                            ) else {
+                            let Ok(resolved) =
+                                resolver.resolve(&snippet, clipboard.clipboard_mut(), Some(values))
+                            else {
                                 return;
                             };
                             if resolved.text.chars().count() > max_expansion_len {
@@ -417,8 +430,8 @@ fn map_reset(cause: ResetCause) -> Reset {
 mod tests {
     use std::{
         path::PathBuf,
-        sync::{Arc, Mutex, RwLock},
         sync::atomic::Ordering,
+        sync::{Arc, Mutex, RwLock},
     };
 
     use crate::{
@@ -557,8 +570,11 @@ mod tests {
     async fn paused_orchestrator_drops_char_input() {
         let _guard = test_guard();
         let injector = Injector::new_with_sink(MockSink::default());
-        let mut orchestrator =
-            Orchestrator::new(vec![snippet(";sig", "hello")], injector, tokio::runtime::Handle::current());
+        let mut orchestrator = Orchestrator::new(
+            vec![snippet(";sig", "hello")],
+            injector,
+            tokio::runtime::Handle::current(),
+        );
         set_paused(true);
 
         let injected = orchestrator.handle_event(HookEvent::Char(';')).unwrap();
@@ -589,9 +605,13 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn foreground_reset_clears_partial_match() {
         let _guard = test_guard();
-        let injector = Injector::<MockSink, MockClipboardBackend>::new_with_sink(MockSink::default());
-        let mut orchestrator =
-            Orchestrator::new(vec![snippet(";sig", "hello")], injector, tokio::runtime::Handle::current());
+        let injector =
+            Injector::<MockSink, MockClipboardBackend>::new_with_sink(MockSink::default());
+        let mut orchestrator = Orchestrator::new(
+            vec![snippet(";sig", "hello")],
+            injector,
+            tokio::runtime::Handle::current(),
+        );
         let _ = orchestrator.handle_event(HookEvent::Char(';')).unwrap();
         let _ = orchestrator.handle_event(HookEvent::Char('s')).unwrap();
 
@@ -608,8 +628,11 @@ mod tests {
     async fn denylisted_gate_blocks_char_input() {
         let _guard = test_guard();
         let injector = Injector::new_with_sink(MockSink::default());
-        let mut orchestrator =
-            Orchestrator::new(vec![snippet(";sig", "hello")], injector, tokio::runtime::Handle::current());
+        let mut orchestrator = Orchestrator::new(
+            vec![snippet(";sig", "hello")],
+            injector,
+            tokio::runtime::Handle::current(),
+        );
         set_denylisted(true);
 
         let injected = orchestrator.handle_event(HookEvent::Char(';')).unwrap();
@@ -622,8 +645,10 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn resolved_round_trip_for_now_and_log_snippets() {
         let _guard = test_guard();
-        let injector =
-            Injector::new_with_parts(MockSink::default(), TestClipboardBackend::with_text("copied"));
+        let injector = Injector::new_with_parts(
+            MockSink::default(),
+            TestClipboardBackend::with_text("copied"),
+        );
         let mut orchestrator = Orchestrator::new(
             vec![
                 snippet(";now", "{{date:%Y}}"),
@@ -654,7 +679,11 @@ mod tests {
         for ch in ";log".chars() {
             let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
         }
-        let year: Vec<char> = chrono::Local::now().format("%Y").to_string().chars().collect();
+        let year: Vec<char> = chrono::Local::now()
+            .format("%Y")
+            .to_string()
+            .chars()
+            .collect();
 
         assert_eq!(
             orchestrator.injector().sink().actions,
@@ -734,7 +763,11 @@ mod tests {
                     required: false,
                     options: Vec::new(),
                     format: None,
-                    cmd: vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+                    cmd: vec![
+                        "cmd".to_string(),
+                        "/c".to_string(),
+                        "echo hello".to_string(),
+                    ],
                     timeout_ms: Some(200),
                     confirm: false,
                 }],
@@ -777,7 +810,11 @@ mod tests {
                     required: false,
                     options: Vec::new(),
                     format: None,
-                    cmd: vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()],
+                    cmd: vec![
+                        "cmd".to_string(),
+                        "/c".to_string(),
+                        "echo hello".to_string(),
+                    ],
                     timeout_ms: Some(200),
                     confirm: false,
                 }],
@@ -810,7 +847,11 @@ mod tests {
         );
         assert_eq!(
             shell_backend.calls(),
-            vec![vec!["cmd".to_string(), "/c".to_string(), "echo hello".to_string()]]
+            vec![vec![
+                "cmd".to_string(),
+                "/c".to_string(),
+                "echo hello".to_string()
+            ]]
         );
     }
 

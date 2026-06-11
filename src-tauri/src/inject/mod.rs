@@ -230,7 +230,9 @@ mod tests {
 
         let actions = &injector.sink().actions;
         assert_eq!(actions.len(), 500);
-        assert!(actions.iter().all(|action| matches!(action, KeyboardAction::Unicode('a'))));
+        assert!(actions
+            .iter()
+            .all(|action| matches!(action, KeyboardAction::Unicode('a'))));
     }
 
     #[cfg(windows)]

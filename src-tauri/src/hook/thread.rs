@@ -26,7 +26,7 @@ struct HklHex(windows::Win32::UI::Input::KeyboardAndMouse::HKL);
 #[cfg(windows)]
 impl fmt::Display for HklHex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0.0 as usize)
+        write!(f, "{:#x}", self.0 .0 as usize)
     }
 }
 
@@ -147,8 +147,8 @@ mod tests {
     use super::{translate_with_layout, TranslateOutcome};
     use windows::{
         core::w,
-        Win32::UI::{
-            Input::KeyboardAndMouse::{HKL, LoadKeyboardLayoutW, KLF_NOTELLSHELL, VK_A, VK_SHIFT},
+        Win32::UI::Input::KeyboardAndMouse::{
+            LoadKeyboardLayoutW, KLF_NOTELLSHELL, VK_A, VK_SHIFT,
         },
     };
 
@@ -178,12 +178,51 @@ mod tests {
     }
 
     #[test]
-    fn translate_with_layout_returns_none_for_null_layout() {
-        let key_state = [0u8; 256];
+    fn translate_with_layout_handles_vk_return() {
+        use windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN;
+        let Ok(hkl) = (unsafe { LoadKeyboardLayoutW(w!("00000409"), KLF_NOTELLSHELL) }) else {
+            return;
+        };
 
-        assert_eq!(
-            translate_with_layout(VK_A.0 as u32, 0, HKL(std::ptr::null_mut()), &key_state),
-            TranslateOutcome::None
+        let key_state = [0u8; 256];
+        let outcome = translate_with_layout(VK_RETURN.0 as u32, 0, hkl, &key_state);
+
+        assert_eq!(outcome, TranslateOutcome::Char('\r'));
+    }
+
+    #[test]
+    fn should_ignore_event_logic() {
+        use super::{should_ignore_event, LLKHF_INJECTED_FLAG};
+        use crate::inject::sendinput::INJECTED_MARKER;
+
+        // 1. Marked injected events are ignored even when suspend is false
+        assert!(
+            should_ignore_event(false, LLKHF_INJECTED_FLAG, INJECTED_MARKER),
+            "marked injected events should be ignored when suspend is false"
+        );
+        assert!(
+            should_ignore_event(true, LLKHF_INJECTED_FLAG, INJECTED_MARKER),
+            "marked injected events should be ignored when suspend is true"
+        );
+
+        // 2. Unmarked injected events are not ignored solely due to LLKHF_INJECTED_FLAG
+        assert!(
+            !should_ignore_event(false, LLKHF_INJECTED_FLAG, 0),
+            "unmarked injected events should not be ignored when suspend is false"
+        );
+        assert!(
+            !should_ignore_event(true, LLKHF_INJECTED_FLAG, 0),
+            "unmarked injected events should not be ignored when suspend is true"
+        );
+
+        // 3. Non-injected events are not ignored
+        assert!(
+            !should_ignore_event(false, 0, INJECTED_MARKER),
+            "non-injected events with marker should not be ignored"
+        );
+        assert!(
+            !should_ignore_event(false, 0, 0),
+            "non-injected events without marker should not be ignored"
         );
     }
 }
@@ -208,6 +247,12 @@ impl Drop for HookHandle {
     }
 }
 
+const LLKHF_INJECTED_FLAG: u32 = 0x10;
+
+fn should_ignore_event(_suspend: bool, flags: u32, dw_extra_info: usize) -> bool {
+    (flags & LLKHF_INJECTED_FLAG) != 0 && dw_extra_info == crate::inject::sendinput::INJECTED_MARKER
+}
+
 #[cfg(windows)]
 fn run_hook_thread(
     producer: &mut HookProducer,
@@ -224,15 +269,13 @@ fn run_hook_thread(
             },
             WindowsAndMessaging::{
                 CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW,
-                GetWindowThreadProcessId, SetWindowsHookExW, TranslateMessage,
-                UnhookWindowsHookEx, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
-                WM_SYSKEYDOWN,
+                GetWindowThreadProcessId, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
+                HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
             },
         },
     };
 
     static HOOK_PRODUCER: AtomicPtr<HookProducer> = AtomicPtr::new(ptr::null_mut());
-    const LLKHF_INJECTED_FLAG: u32 = 0x10;
 
     unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if code == HC_ACTION as i32 {
@@ -240,9 +283,11 @@ fn run_hook_thread(
             if message == WM_KEYDOWN || message == WM_SYSKEYDOWN {
                 // SAFETY: lparam is provided by the OS for WH_KEYBOARD_LL callbacks.
                 let keyboard = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
-                if crate::inject::SUSPEND.load(Ordering::Relaxed)
-                    && (keyboard.flags.0 & LLKHF_INJECTED_FLAG) != 0
-                {
+                if should_ignore_event(
+                    crate::inject::SUSPEND.load(Ordering::Relaxed),
+                    keyboard.flags.0,
+                    keyboard.dwExtraInfo,
+                ) {
                     return unsafe { CallNextHookEx(HHOOK::default(), code, wparam, lparam) };
                 }
                 let producer_ptr = HOOK_PRODUCER.load(Ordering::Relaxed);

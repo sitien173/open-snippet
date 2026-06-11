@@ -1,5 +1,7 @@
 //! SendInput keyboard sink.
 
+pub const INJECTED_MARKER: usize = 0x5442_4C5A;
+
 use super::{KeyboardAction, KeyboardSink};
 
 #[derive(Default)]
@@ -67,6 +69,7 @@ fn send_windows_action(action: KeyboardAction) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_BACK.0),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -77,6 +80,7 @@ fn send_windows_action(action: KeyboardAction) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_BACK.0),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -91,6 +95,7 @@ fn send_windows_action(action: KeyboardAction) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_LEFT.0),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -101,6 +106,7 @@ fn send_windows_action(action: KeyboardAction) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_LEFT.0),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -118,6 +124,7 @@ fn send_windows_action(action: KeyboardAction) {
                             ki: KEYBDINPUT {
                                 wScan: unit,
                                 dwFlags: KEYEVENTF_UNICODE,
+                                dwExtraInfo: INJECTED_MARKER,
                                 ..Default::default()
                             },
                         },
@@ -128,6 +135,7 @@ fn send_windows_action(action: KeyboardAction) {
                             ki: KEYBDINPUT {
                                 wScan: unit,
                                 dwFlags: KEYBD_EVENT_FLAGS(KEYEVENTF_UNICODE.0 | KEYEVENTF_KEYUP.0),
+                                dwExtraInfo: INJECTED_MARKER,
                                 ..Default::default()
                             },
                         },
@@ -143,6 +151,7 @@ fn send_windows_action(action: KeyboardAction) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_CONTROL.0),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -152,6 +161,7 @@ fn send_windows_action(action: KeyboardAction) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(b'V' as u16),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -162,6 +172,7 @@ fn send_windows_action(action: KeyboardAction) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(b'V' as u16),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -172,6 +183,7 @@ fn send_windows_action(action: KeyboardAction) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_CONTROL.0),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -204,6 +216,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
             Anonymous: INPUT_0 {
                 ki: KEYBDINPUT {
                     wVk: vk,
+                    dwExtraInfo: INJECTED_MARKER,
                     ..Default::default()
                 },
             },
@@ -214,6 +227,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                 ki: KEYBDINPUT {
                     wVk: vk,
                     dwFlags: KEYEVENTF_KEYUP,
+                    dwExtraInfo: INJECTED_MARKER,
                     ..Default::default()
                 },
             },
@@ -229,6 +243,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                     ki: KEYBDINPUT {
                         wScan: unit,
                         dwFlags: KEYEVENTF_UNICODE,
+                        dwExtraInfo: INJECTED_MARKER,
                         ..Default::default()
                     },
                 },
@@ -239,6 +254,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                     ki: KEYBDINPUT {
                         wScan: unit,
                         dwFlags: KEYBD_EVENT_FLAGS(KEYEVENTF_UNICODE.0 | KEYEVENTF_KEYUP.0),
+                        dwExtraInfo: INJECTED_MARKER,
                         ..Default::default()
                     },
                 },
@@ -258,6 +274,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_CONTROL.0),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -267,6 +284,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(b'V' as u16),
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -277,6 +295,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(b'V' as u16),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
@@ -287,6 +306,7 @@ fn send_windows_actions(actions: &[KeyboardAction]) {
                         ki: KEYBDINPUT {
                             wVk: VIRTUAL_KEY(VK_CONTROL.0),
                             dwFlags: KEYEVENTF_KEYUP,
+                            dwExtraInfo: INJECTED_MARKER,
                             ..Default::default()
                         },
                     },
