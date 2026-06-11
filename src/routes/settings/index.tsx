@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Snippet, listSnippets } from "../../lib/snippets";
+import { Snippet, listSnippets, getStoreSettings } from "../../lib/snippets";
 import { SnippetList } from "./SnippetList";
 import { SnippetEditor } from "./SnippetEditor";
 import { PrefsPanel } from "./PrefsPanel";
@@ -17,6 +17,7 @@ export function Settings() {
   const [loading, setLoading] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [triggerPrefix, setTriggerPrefix] = useState<string>(":");
 
   const fetchSnippets = async () => {
     setLoading(true);
@@ -30,8 +31,18 @@ export function Settings() {
     }
   };
 
+  const fetchPrefix = async () => {
+    try {
+      const settings = await getStoreSettings();
+      setTriggerPrefix(settings.trigger_prefix);
+    } catch (err) {
+      log.error("Failed to load trigger prefix settings", { error: err });
+    }
+  };
+
   useEffect(() => {
     fetchSnippets();
+    fetchPrefix();
   }, []);
 
   const handleEditSnippet = (snippet: Snippet) => {
@@ -129,6 +140,7 @@ export function Settings() {
             allSnippets={snippets}
             onSave={handleSaveEditor}
             onCancel={handleCancelEditor}
+            triggerPrefix={triggerPrefix}
           />
         ) : (
           <>
@@ -140,7 +152,12 @@ export function Settings() {
                 onCreateSnippet={handleCreateSnippet}
               />
             )}
-            {activeTab === "preferences" && <PrefsPanel />}
+            {activeTab === "preferences" && (
+              <PrefsPanel
+                triggerPrefix={triggerPrefix}
+                onPrefixSaved={(newPrefix) => setTriggerPrefix(newPrefix)}
+              />
+            )}
             {activeTab === "sync" && <SyncPanel />}
           </>
         )}

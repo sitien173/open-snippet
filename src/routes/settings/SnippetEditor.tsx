@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Snippet, VarDecl, saveSnippet, reloadSnippets } from "../../lib/snippets";
+import { Snippet, VarDecl, saveSnippet, reloadSnippets, getStoreSettings } from "../../lib/snippets";
 import { VarsPanel } from "./VarsPanel";
 import { I } from "../../lib/icons";
 
@@ -8,22 +8,40 @@ export interface SnippetEditorProps {
   allSnippets?: Snippet[];
   onSave?: () => void;
   onCancel?: () => void;
+  triggerPrefix?: string;
 }
 
-export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: SnippetEditorProps) {
+export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel, triggerPrefix }: SnippetEditorProps) {
   const [trigger, setTrigger] = useState("");
+  const [triggerLiteral, setTriggerLiteral] = useState(false);
   const [replace, setReplace] = useState("");
   const [vars, setVars] = useState<VarDecl[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [localPrefix, setLocalPrefix] = useState<string>(":");
 
   // Sync state with snippet prop when it changes
   useEffect(() => {
     setTrigger(snippet?.trigger || "");
+    setTriggerLiteral(snippet?.trigger_literal || false);
     setReplace(snippet?.replace || "");
     setVars(snippet?.vars || []);
     setError(null);
   }, [snippet]);
+
+  useEffect(() => {
+    if (triggerPrefix !== undefined) {
+      setLocalPrefix(triggerPrefix);
+    } else {
+      getStoreSettings()
+        .then((data) => {
+          setLocalPrefix(data.trigger_prefix);
+        })
+        .catch(() => {
+          // ignore or fallback to ":"
+        });
+    }
+  }, [triggerPrefix]);
 
   const sourceFile =
     snippet?.source_file ||
@@ -65,7 +83,9 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
       await saveSnippet({
         source_file: sourceFile,
         original_trigger: snippet?.trigger || null,
+        original_trigger_literal: snippet?.trigger_literal ?? null,
         trigger,
+        trigger_literal: triggerLiteral,
         replace,
         vars,
       });
@@ -104,17 +124,35 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel }: S
       <form onSubmit={handleSave} className="panel" style={{ padding: "24px" }}>
         <div className={`field ${validationError ? "has-error" : ""}`}>
           <label htmlFor="snippet-trigger">Trigger</label>
-          <input
-            id="snippet-trigger"
-            type="text"
-            value={trigger}
-            onChange={(e) => setTrigger(e.target.value)}
-            style={{ width: "100%", maxWidth: "400px" }}
-          />
+          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", width: "100%", maxWidth: "400px" }}>
+            <input
+              id="snippet-trigger"
+              type="text"
+              value={trigger}
+              onChange={(e) => setTrigger(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "14px", marginTop: "8px" }}>
+              <input 
+                type="checkbox" 
+                checked={triggerLiteral} 
+                onChange={(e) => setTriggerLiteral(e.target.checked)} 
+                aria-label="Exact match"
+              />
+              Exact match
+            </label>
+          </div>
           {validationError ? (
             <div className="error-text">{validationError}</div>
           ) : (
-            <div className="help">The text trigger that expands into this snippet (e.g. /greeting)</div>
+            <div className="help">
+              The text trigger that expands into this snippet (e.g. /greeting).
+              {!triggerLiteral && trigger && (
+                <span style={{ display: "block", marginTop: "4px" }}>
+                  Effective trigger: <code style={{ background: "var(--color-bg-subdued)", padding: "2px 4px", borderRadius: "4px" }}>{trigger.startsWith(localPrefix) ? trigger : localPrefix + trigger}</code>
+                </span>
+              )}
+            </div>
           )}
         </div>
 

@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { SnippetEditor } from "../SnippetEditor";
 import { Snippet } from "../../../lib/snippets";
+import { Settings } from "../index";
+import { MemoryRouter } from "react-router-dom";
 
 const mockSnippet: Snippet = {
   id: "snippets/default.yaml::greet",
@@ -194,6 +196,161 @@ describe("SnippetEditor", () => {
         })
       }));
       expect(mockInvoke).toHaveBeenCalledWith("reload_snippets");
+    });
+  });
+
+  test("shows read-only effective trigger hint when trigger_literal is false", async () => {
+    render(<SnippetEditor snippet={{ ...mockSnippet, trigger: "greet", effective_trigger: ":greet", trigger_literal: false }} allSnippets={otherSnippets} />);
+    
+    // Should show the effective trigger hint
+    expect(screen.getByText(/:greet/)).toBeInTheDocument();
+    expect(screen.getByText(/effective trigger/i)).toBeInTheDocument();
+  });
+
+  test("hides effective trigger hint when trigger_literal is true", async () => {
+    render(<SnippetEditor snippet={{ ...mockSnippet, trigger: "greet", effective_trigger: "greet", trigger_literal: true }} allSnippets={otherSnippets} />);
+    
+    // Should NOT show the effective trigger hint
+    expect(screen.queryByText(/effective trigger/i)).not.toBeInTheDocument();
+  });
+
+  test("toggling trigger_literal to true hides hint and includes it in save payload", async () => {
+    const mockInvoke = vi.fn().mockResolvedValue(null);
+    window.__OPENMACRO_MOCK_INVOKE = mockInvoke;
+
+    const user = userEvent.setup();
+    render(<SnippetEditor snippet={{ ...mockSnippet, trigger: "greet", effective_trigger: ":greet", trigger_literal: false }} allSnippets={otherSnippets} />);
+    
+    expect(screen.getByText(/:greet/)).toBeInTheDocument();
+
+    const literalToggle = screen.getByLabelText(/exact match/i); // assuming label "Exact match" or "Literal"
+    await user.click(literalToggle);
+
+    expect(screen.queryByText(/:greet/)).not.toBeInTheDocument();
+
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    await user.click(saveButton);
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("save_snippet", expect.objectContaining({
+        payload: expect.objectContaining({
+          trigger: "greet",
+          trigger_literal: true,
+          original_trigger_literal: false
+        })
+      }));
+    });
+  });
+
+  test("uses the triggerPrefix prop for the effective trigger hint", () => {
+    render(
+      <SnippetEditor
+        snippet={{ ...mockSnippet, trigger: "greet", trigger_literal: false }}
+        allSnippets={otherSnippets}
+        triggerPrefix="!!"
+      />
+    );
+    expect(screen.getByText(/!!greet/)).toBeInTheDocument();
+  });
+
+  test("editing the trigger input updates the effective trigger hint live", async () => {
+    const user = userEvent.setup();
+    render(
+      <SnippetEditor
+        snippet={{ ...mockSnippet, trigger: "greet", trigger_literal: false }}
+        allSnippets={otherSnippets}
+        triggerPrefix=":"
+      />
+    );
+    expect(screen.getByText(/:greet/)).toBeInTheDocument();
+
+    const triggerInput = screen.getByLabelText(/trigger/i);
+    await user.clear(triggerInput);
+    await user.type(triggerInput, "hello");
+
+    expect(screen.getByText(/:hello/)).toBeInTheDocument();
+  });
+
+  test("a trigger already starting with the prefix is not double-prepended in the hint", async () => {
+    const user = userEvent.setup();
+    render(
+      <SnippetEditor
+        snippet={{ ...mockSnippet, trigger: ":greet", trigger_literal: false }}
+        allSnippets={otherSnippets}
+        triggerPrefix=":"
+      />
+    );
+    expect(screen.getByText(/:greet/)).toBeInTheDocument();
+    expect(screen.queryByText(/::greet/)).not.toBeInTheDocument();
+
+    const triggerInput = screen.getByLabelText(/trigger/i);
+    await user.clear(triggerInput);
+    await user.type(triggerInput, ":hello");
+
+    expect(screen.getByText(/:hello/)).toBeInTheDocument();
+    expect(screen.queryByText(/::hello/)).not.toBeInTheDocument();
+  });
+
+  test("after the prefix setting is saved, opening the editor uses the new prefix", async () => {
+    const mockInvoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "get_prefs") {
+        return { paused: false, autostart: false, max_expansion_len: 1000, shell_consent: false };
+      }
+      if (cmd === "get_store_settings") {
+        return { trigger_prefix: ":" };
+      }
+      if (cmd === "list_snippets") {
+        return [mockSnippet];
+      }
+      if (cmd === "set_store_settings") {
+        return null;
+      }
+      return null;
+    });
+    window.__OPENMACRO_MOCK_INVOKE = mockInvoke;
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Settings />
+      </MemoryRouter>
+    );
+
+    // Wait for settings to load and render snippets
+    await waitFor(() => {
+      expect(screen.getByText(/greet/i)).toBeInTheDocument();
+    });
+
+    // Go to preferences tab
+    const prefTabButton = screen.getByRole("button", { name: /preferences/i });
+    await user.click(prefTabButton);
+
+    // Edit prefix and save
+    const prefixInput = screen.getByLabelText(/trigger prefix/i);
+    expect(prefixInput).toHaveValue(":");
+
+    await user.clear(prefixInput);
+    await user.type(prefixInput, "!!");
+    
+    const savePrefixBtn = screen.getByRole("button", { name: /save prefix/i });
+    await user.click(savePrefixBtn);
+
+    // Wait for set_store_settings call
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_store_settings", { settings: { trigger_prefix: "!!" } });
+    });
+
+    // Switch back to snippets tab
+    const snippetsTabButton = screen.getByRole("button", { name: /snippets/i });
+    await user.click(snippetsTabButton);
+
+    // Open editor by clicking edit on "greet"
+    const editButton = screen.getByRole("button", { name: /edit/i });
+    await user.click(editButton);
+
+    // Verify that the editor uses the new prefix (!!greet)
+    await waitFor(() => {
+      expect(screen.getByText(/!!greet/)).toBeInTheDocument();
     });
   });
 });

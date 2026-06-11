@@ -1,23 +1,34 @@
 import { useState, useEffect } from "react";
-import { Prefs, getPrefs, listSnippets, setPrefs } from "../../lib/snippets";
+import { Prefs, StoreSettings, getPrefs, getStoreSettings, listSnippets, setPrefs, setStoreSettings } from "../../lib/snippets";
 import { ShellConsentDialog } from "./ShellConsentDialog";
 import { I } from "../../lib/icons";
 import { getLogger } from "../../lib/logger";
 
 const log = getLogger("settings.prefs");
 
-export function PrefsPanel() {
+export interface PrefsPanelProps {
+  triggerPrefix?: string;
+  onPrefixSaved?: (newPrefix: string) => void;
+}
+
+export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {}) {
   const [prefs, setPrefsState] = useState<Prefs | null>(null);
+  const [storeSettings, setStoreSettingsState] = useState<StoreSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [prefixSaveStatus, setPrefixSaveStatus] = useState<string | null>(null);
   const [dialogDismissed, setDialogDismissed] = useState(false);
   const [checkedInitialConsent, setCheckedInitialConsent] = useState(false);
   const [showShellConsentDialog, setShowShellConsentDialog] = useState(false);
+  const [prefixInput, setPrefixInput] = useState("");
+  const [prefixError, setPrefixError] = useState<string | null>(null);
 
   useEffect(() => {
-    getPrefs()
-      .then((data) => {
-        setPrefsState(data);
+    Promise.all([getPrefs(), getStoreSettings()])
+      .then(([prefsData, storeSettingsData]) => {
+        setPrefsState(prefsData);
+        setStoreSettingsState(storeSettingsData);
+        setPrefixInput(storeSettingsData.trigger_prefix);
         setLoading(false);
       })
       .catch((err) => {
@@ -25,6 +36,12 @@ export function PrefsPanel() {
         setLoading(false);
       });
   }, []);
+
+  useEffect(() => {
+    if (triggerPrefix !== undefined) {
+      setPrefixInput(triggerPrefix);
+    }
+  }, [triggerPrefix]);
 
   const persistPrefs = async (updated: Prefs) => {
     setPrefsState(updated);
@@ -36,6 +53,29 @@ export function PrefsPanel() {
     } catch (err) {
       setSaveStatus("Error saving");
       log.error("Failed to persist preferences", { error: err });
+    }
+  };
+
+  const persistPrefix = async () => {
+    if (!storeSettings) return;
+    setPrefixSaveStatus("Saving...");
+    setPrefixError(null);
+    try {
+      const updated = { trigger_prefix: prefixInput };
+      await setStoreSettings(updated);
+      setStoreSettingsState(updated);
+      setPrefixSaveStatus("Saved");
+      if (onPrefixSaved) {
+        onPrefixSaved(prefixInput);
+      }
+      setTimeout(() => setPrefixSaveStatus(null), 2000);
+    } catch (err: unknown) {
+      const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "Error saving prefix";
+      setPrefixError(msg);
+      setPrefixSaveStatus(null);
+      // Rollback to actual state
+      setPrefixInput(storeSettings.trigger_prefix);
+      log.error("Failed to persist trigger prefix", { error: err });
     }
   };
 
@@ -67,7 +107,7 @@ export function PrefsPanel() {
     return <div style={{ color: "var(--color-text-subdued)", padding: "16px" }}>Loading preferences...</div>;
   }
 
-  if (!prefs) {
+  if (!prefs || !storeSettings) {
     return (
       <div className="warning-card" style={{ background: "var(--color-decorative-red)", borderColor: "var(--color-border-red)" }}>
         <div className="ico" style={{ color: "var(--color-text-red)" }}>
@@ -99,7 +139,35 @@ export function PrefsPanel() {
         </div>
 
         <div className="panel" style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
-          <div className="pref-item" style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label htmlFor="pref-trigger-prefix" style={{ fontWeight: 500 }}>Trigger prefix</label>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", width: "100%", maxWidth: "400px" }}>
+              <input
+                id="pref-trigger-prefix"
+                type="text"
+                value={prefixInput}
+                onChange={(e) => setPrefixInput(e.target.value)}
+                style={{ width: "120px", height: "36px", padding: "6px 10px" }}
+              />
+              <button className="btn btn-secondary sm" type="button" onClick={persistPrefix}>Save prefix</button>
+              {prefixSaveStatus && (
+                <span className={`badge ${prefixSaveStatus === "Saved" ? "green" : "gray"}`}>
+                  <span className="dot" />
+                  {prefixSaveStatus}
+                </span>
+              )}
+            </div>
+            {prefixError && (
+              <div style={{ color: "var(--color-text-red)", fontSize: "12px", marginTop: "8px" }}>
+                {prefixError}
+              </div>
+            )}
+            <span className="help">
+              Global prefix required before all snippet triggers. Preview: <code>{prefixInput}email</code>
+            </span>
+          </div>
+
+          <div className="pref-item" style={{ display: "flex", alignItems: "flex-start", gap: "12px", borderTop: "1px solid var(--color-border-subdued)", paddingTop: "16px" }}>
             <input
               id="pref-paused"
               type="checkbox"
