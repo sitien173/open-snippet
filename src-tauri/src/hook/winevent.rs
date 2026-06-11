@@ -63,6 +63,7 @@ pub(crate) mod test_sync {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     use super::DENYLISTED;
+    use crate::inject::SUSPEND;
 
     pub(crate) fn global_state_guard() -> MutexGuard<'static, ()> {
         let guard = GLOBAL_STATE_LOCK
@@ -70,6 +71,7 @@ pub(crate) mod test_sync {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         DENYLISTED.store(false, std::sync::atomic::Ordering::Relaxed);
+        SUSPEND.store(false, std::sync::atomic::Ordering::Relaxed);
         guard
     }
 
@@ -80,8 +82,10 @@ pub(crate) mod test_sync {
 mod tests {
     use crate::{
         hook::{winevent::testing, ResetCause},
+        inject::SUSPEND,
         matcher::MatchBuffer,
     };
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn foreground_change_to_denylisted_process_clears_buffer_and_sets_gate() {
@@ -115,5 +119,14 @@ mod tests {
         );
         assert_eq!(buffer.as_str(), "");
         assert!(!super::is_denylisted());
+    }
+
+    #[test]
+    fn global_state_guard_resets_suspend_flag() {
+        SUSPEND.store(true, Ordering::Relaxed);
+
+        let _guard = super::test_sync::global_state_guard();
+
+        assert!(!SUSPEND.load(Ordering::Relaxed));
     }
 }

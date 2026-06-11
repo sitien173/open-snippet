@@ -542,6 +542,8 @@ mod tests {
         Snippet {
             id: format!("test::{trigger}"),
             trigger: trigger.to_string(),
+            raw_trigger: trigger.to_string(),
+            trigger_literal: false,
             replace: replace.to_string(),
             vars: Vec::new(),
             source_file: PathBuf::from("test.yaml"),

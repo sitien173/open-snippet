@@ -7,6 +7,8 @@ import { Snippet } from "../../../lib/snippets";
 const mockSnippet: Snippet = {
   id: "snippets/default.yaml::greet",
   trigger: "greet",
+  effective_trigger: "greet",
+  trigger_literal: false,
   replace: "Hello $|$",
   vars: [],
   source_file: "F:/projects_new/textblaze/snippets/default.yaml",
@@ -17,6 +19,8 @@ const otherSnippets: Snippet[] = [
   {
     id: "snippets/default.yaml::other",
     trigger: "other",
+    effective_trigger: "other",
+    trigger_literal: false,
     replace: "Other text",
     vars: [],
     source_file: "F:/projects_new/textblaze/snippets/default.yaml",
@@ -25,6 +29,8 @@ const otherSnippets: Snippet[] = [
   {
     id: "snippets/other-file.yaml::greet",
     trigger: "greet",
+    effective_trigger: "greet",
+    trigger_literal: false,
     replace: "Greet in other file",
     vars: [],
     source_file: "F:/projects_new/textblaze/snippets/other-file.yaml",

@@ -7,12 +7,17 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
 
-use crate::store::{load_from_root, LoadError, Snippet, VarDecl};
+use crate::store::{
+    effective_trigger, load_from_root, load_settings, settings_path, validate_trigger_prefix,
+    LoadError, Snippet, StoreSettings, VarDecl,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SnippetDto {
     pub id: String,
     pub trigger: String,
+    pub effective_trigger: String,
+    pub trigger_literal: bool,
     pub replace: String,
     pub vars: Vec<VarDecl>,
     pub source_file: String,
@@ -23,7 +28,11 @@ pub struct SnippetDto {
 pub struct SaveSnippetDto {
     pub source_file: PathBuf,
     pub original_trigger: Option<String>,
+    #[serde(default)]
+    pub original_trigger_literal: Option<bool>,
     pub trigger: String,
+    #[serde(default)]
+    pub trigger_literal: bool,
     pub replace: String,
     pub vars: Vec<VarDecl>,
 }
@@ -62,6 +71,8 @@ struct RootDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SnippetDocument {
     trigger: String,
+    #[serde(default)]
+    trigger_literal: bool,
     replace: String,
     #[serde(default)]
     vars: Vec<VarDecl>,
@@ -160,6 +171,23 @@ pub fn list_load_errors(state: tauri::State<'_, SnippetStoreState>) -> Vec<LoadE
     errors
 }
 
+#[tauri::command]
+#[tracing::instrument(skip(state))]
+pub fn get_store_settings(
+    state: tauri::State<'_, SnippetStoreState>,
+) -> Result<StoreSettings, String> {
+    get_store_settings_inner(state.inner())
+}
+
+#[tauri::command]
+#[tracing::instrument(skip(state, settings), fields(trigger_prefix = %settings.trigger_prefix))]
+pub fn set_store_settings(
+    state: tauri::State<'_, SnippetStoreState>,
+    settings: StoreSettings,
+) -> Result<(), String> {
+    set_store_settings_inner(state.inner(), settings)
+}
+
 pub fn list_snippets_inner(state: &SnippetStoreState) -> Vec<SnippetDto> {
     let snapshot = state.snapshot();
     snapshot
@@ -169,7 +197,9 @@ pub fn list_snippets_inner(state: &SnippetStoreState) -> Vec<SnippetDto> {
             file_relative: relative_path(&snippet.source_file, state.root()),
             source_file: snippet.source_file.display().to_string(),
             id: snippet.id,
-            trigger: snippet.trigger,
+            trigger: snippet.raw_trigger,
+            effective_trigger: snippet.trigger,
+            trigger_literal: snippet.trigger_literal,
             replace: snippet.replace,
             vars: snippet.vars,
         })
@@ -177,21 +207,28 @@ pub fn list_snippets_inner(state: &SnippetStoreState) -> Vec<SnippetDto> {
 }
 
 pub fn save_snippet_inner(
-    _state: &SnippetStoreState,
+    state: &SnippetStoreState,
     payload: SaveSnippetDto,
 ) -> Result<(), String> {
     let mut document = read_yaml_document(&payload.source_file)?;
+    let settings = get_store_settings_inner(state)?;
 
     let replacement = SnippetDocument {
         trigger: payload.trigger.clone(),
+        trigger_literal: payload.trigger_literal,
         replace: payload.replace,
         vars: payload.vars,
     };
 
     let original_trigger = payload.original_trigger.as_deref();
+    let original_trigger_literal = payload.original_trigger_literal;
     let mut replaced = false;
     for snippet in &mut document.snippets {
-        if Some(snippet.trigger.as_str()) == original_trigger {
+        let trigger_matches = Some(snippet.trigger.as_str()) == original_trigger;
+        let literal_matches = original_trigger_literal
+            .map(|value| snippet.trigger_literal == value)
+            .unwrap_or(true);
+        if trigger_matches && literal_matches {
             *snippet = replacement.clone();
             replaced = true;
             break;
@@ -201,16 +238,33 @@ pub fn save_snippet_inner(
         document.snippets.push(replacement.clone());
     }
 
-    let collision_count = document
-        .snippets
-        .iter()
-        .filter(|snippet| snippet.trigger == payload.trigger)
-        .count();
-    if collision_count > 1 {
-        return Err(format!("trigger collision: {}", payload.trigger));
+    let mut effective_triggers = std::collections::HashSet::new();
+    for snippet in &document.snippets {
+        let snippet_effective_trigger =
+            effective_trigger(&snippet.trigger, snippet.trigger_literal, &settings);
+        if !effective_triggers.insert(snippet_effective_trigger.clone()) {
+            return Err(format!("trigger collision: {snippet_effective_trigger}"));
+        }
     }
-
     write_yaml_document(&payload.source_file, &document)
+}
+
+pub fn get_store_settings_inner(state: &SnippetStoreState) -> Result<StoreSettings, String> {
+    match load_settings(state.root()) {
+        Ok(settings) => Ok(settings),
+        Err(error) => Err(error.message()),
+    }
+}
+
+pub fn set_store_settings_inner(
+    state: &SnippetStoreState,
+    settings: StoreSettings,
+) -> Result<(), String> {
+    let path = settings_path(state.root());
+    validate_trigger_prefix(&path, &settings.trigger_prefix).map_err(|error| error.message())?;
+    write_store_settings(&path, &settings)?;
+    state.trigger_reload();
+    Ok(())
 }
 
 pub fn reload_snippets_inner(state: &SnippetStoreState) -> Result<ReloadResult, String> {
@@ -247,6 +301,21 @@ fn write_yaml_document(path: &Path, document: &RootDocument) -> Result<(), Strin
         .ok_or_else(|| format!("missing parent directory for {}", path.display()))?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let serialized = serde_yaml::to_string(document).map_err(|error| error.to_string())?;
+    let mut temp = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+    use std::io::Write;
+    temp.write_all(serialized.as_bytes())
+        .map_err(|error| error.to_string())?;
+    temp.persist(path)
+        .map_err(|error| error.error.to_string())?;
+    Ok(())
+}
+
+fn write_store_settings(path: &Path, settings: &StoreSettings) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("missing parent directory for {}", path.display()))?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let serialized = serde_yaml::to_string(settings).map_err(|error| error.to_string())?;
     let mut temp = NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
     use std::io::Write;
     temp.write_all(serialized.as_bytes())

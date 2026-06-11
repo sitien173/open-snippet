@@ -111,6 +111,8 @@ describe("Form Container Route", () => {
   const mockSnippet: Snippet = {
     id: "greet-snippet-id",
     trigger: "greet",
+    effective_trigger: "greet",
+    trigger_literal: false,
     replace: "hello {{name}}",
     vars: [
       { name: "name", kind: "text", label: "First Name", required: true },

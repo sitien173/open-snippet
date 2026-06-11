@@ -5,10 +5,11 @@ use std::{
 
 use openmacro_lib::{
     commands::snippets::{
-        list_load_errors_inner, list_snippets_inner, load_snippet_store_state,
-        reload_snippets_inner, save_snippet_inner, SaveSnippetDto,
+        get_store_settings_inner, list_load_errors_inner, list_snippets_inner,
+        load_snippet_store_state, reload_snippets_inner, save_snippet_inner,
+        set_store_settings_inner, SaveSnippetDto,
     },
-    store::{VarDecl, VarKind},
+    store::{StoreSettings, VarDecl, VarKind},
 };
 use tempfile::TempDir;
 
@@ -49,7 +50,9 @@ snippets:
         SaveSnippetDto {
             source_file: root.path().join("alpha.yaml"),
             original_trigger: None,
+            original_trigger_literal: None,
             trigger: ";log".to_string(),
+            trigger_literal: false,
             replace: "line one".to_string(),
             vars: vec![VarDecl {
                 name: "clip".to_string(),
@@ -105,7 +108,9 @@ snippets:
         SaveSnippetDto {
             source_file: root.path().join("alpha.yaml"),
             original_trigger: None,
+            original_trigger_literal: None,
             trigger: ";sig".to_string(),
+            trigger_literal: false,
             replace: "collision".to_string(),
             vars: Vec::new(),
         },
@@ -113,5 +118,183 @@ snippets:
     .unwrap_err();
 
     assert_eq!(error, "trigger collision: ;sig");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_reload_and_list_preserves_trigger_literal() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: sig
+    trigger_literal: true
+    replace: hello
+"#,
+    );
+    let state = load_snippet_store_state().unwrap();
+
+    save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: root.path().join("alpha.yaml"),
+            original_trigger: Some("sig".to_string()),
+            original_trigger_literal: Some(true),
+            trigger: "sig".to_string(),
+            trigger_literal: true,
+            replace: "updated".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap();
+
+    let reload = reload_snippets_inner(&state).unwrap();
+    let snippets = list_snippets_inner(&state);
+    let saved = fs::read_to_string(root.path().join("alpha.yaml")).unwrap();
+
+    assert_eq!(reload.loaded, 1);
+    assert!(reload.errors.is_empty());
+    assert!(saved.contains("trigger_literal: true"), "{saved}");
+    assert!(snippets.iter().any(|snippet| {
+        snippet.trigger == "sig"
+            && snippet.trigger_literal
+            && snippet.replace == "updated"
+            && snippet.id == "alpha.yaml::sig"
+    }));
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn list_snippets_exposes_raw_and_effective_trigger_under_custom_prefix() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "_settings.yaml",
+        r#"
+trigger_prefix: ":"
+"#,
+    );
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: email
+    replace: hello
+"#,
+    );
+
+    let state = load_snippet_store_state().unwrap();
+    let snippets = list_snippets_inner(&state);
+
+    assert_eq!(snippets.len(), 1);
+    assert_eq!(snippets[0].trigger, "email");
+    assert_eq!(snippets[0].effective_trigger, ":email");
+    assert_eq!(snippets[0].id, "alpha.yaml:::email");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_replaces_bare_trigger_under_custom_prefix_instead_of_appending() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "_settings.yaml",
+        r#"
+trigger_prefix: ":"
+"#,
+    );
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: email
+    replace: hello
+"#,
+    );
+    let state = load_snippet_store_state().unwrap();
+
+    save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: root.path().join("alpha.yaml"),
+            original_trigger: Some("email".to_string()),
+            original_trigger_literal: Some(false),
+            trigger: "email".to_string(),
+            trigger_literal: false,
+            replace: "updated".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap();
+
+    let reload = reload_snippets_inner(&state).unwrap();
+    let snippets = list_snippets_inner(&state);
+    let saved = fs::read_to_string(root.path().join("alpha.yaml")).unwrap();
+
+    assert_eq!(reload.loaded, 1);
+    assert!(reload.errors.is_empty());
+    assert_eq!(saved.matches("- trigger: email").count(), 1, "{saved}");
+    assert!(snippets.iter().any(|snippet| {
+        snippet.trigger == "email"
+            && snippet.effective_trigger == ":email"
+            && snippet.replace == "updated"
+    }));
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn store_settings_round_trip_through_backend_helpers() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: ;sig
+    replace: hello
+"#,
+    );
+    let state = load_snippet_store_state().unwrap();
+
+    assert_eq!(
+        get_store_settings_inner(&state).unwrap(),
+        StoreSettings {
+            trigger_prefix: ";".to_string()
+        }
+    );
+
+    set_store_settings_inner(
+        &state,
+        StoreSettings {
+            trigger_prefix: ":".to_string(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        get_store_settings_inner(&state).unwrap(),
+        StoreSettings {
+            trigger_prefix: ":".to_string()
+        }
+    );
+    assert!(fs::read_to_string(root.path().join("_settings.yaml"))
+        .unwrap()
+        .contains("trigger_prefix: ':'"));
     std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
 }

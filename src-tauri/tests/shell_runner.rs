@@ -109,6 +109,8 @@ fn shell_snippet(confirm: bool) -> Snippet {
     Snippet {
         id: "test::;shell".to_string(),
         trigger: ";shell".to_string(),
+        raw_trigger: ";shell".to_string(),
+        trigger_literal: false,
         replace: "{{out}}".to_string(),
         vars: vec![shell_var(confirm)],
         source_file: PathBuf::from(r"F:\projects_new\textblaze\openmacro\snippets\shell.yaml"),

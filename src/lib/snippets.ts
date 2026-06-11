@@ -15,6 +15,8 @@ export type VarDecl = {
 export type Snippet = {
   id: string;
   trigger: string;
+  effective_trigger: string;
+  trigger_literal: boolean;
   replace: string;
   vars: VarDecl[];
   source_file: string;
@@ -24,9 +26,15 @@ export type Snippet = {
 export type SaveSnippetDto = {
   source_file: string;
   original_trigger: string | null;
+  original_trigger_literal?: boolean | null;
   trigger: string;
+  trigger_literal?: boolean;
   replace: string;
   vars: VarDecl[];
+};
+
+export type StoreSettings = {
+  trigger_prefix: string;
 };
 
 export type LoadErrorDto = {
@@ -78,6 +86,14 @@ export async function saveSnippet(payload: SaveSnippetDto): Promise<void> {
 
 export async function reloadSnippets(): Promise<ReloadResult> {
   return safeInvoke<ReloadResult>("reload_snippets");
+}
+
+export async function getStoreSettings(): Promise<StoreSettings> {
+  return safeInvoke<StoreSettings>("get_store_settings");
+}
+
+export async function setStoreSettings(settings: StoreSettings): Promise<void> {
+  return safeInvoke<void>("set_store_settings", { settings });
 }
 
 export async function getPrefs(): Promise<Prefs> {

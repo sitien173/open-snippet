@@ -8,6 +8,8 @@ fn test_matcher_enter_burst() {
     let snippet = Snippet {
         id: "test_id".to_string(),
         trigger: "/test".to_string(),
+        raw_trigger: "/test".to_string(),
+        trigger_literal: false,
         replace: "replace".to_string(),
         vars: vec![],
         source_file: PathBuf::from("test.yaml"),

@@ -13,13 +13,33 @@ fn default_log_max_files() -> usize {
     7
 }
 
+fn default_trigger_prefix() -> String {
+    ";".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snippet {
     pub id: String,
     pub trigger: String,
+    pub raw_trigger: String,
+    pub trigger_literal: bool,
     pub replace: String,
     pub vars: Vec<VarDecl>,
     pub source_file: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreSettings {
+    #[serde(default = "default_trigger_prefix")]
+    pub trigger_prefix: String,
+}
+
+impl Default for StoreSettings {
+    fn default() -> Self {
+        Self {
+            trigger_prefix: default_trigger_prefix(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -22,6 +22,8 @@ fn snippet(replace: &str, vars: Vec<VarDecl>) -> Snippet {
     Snippet {
         id: "test::snippet".to_string(),
         trigger: ";test".to_string(),
+        raw_trigger: ";test".to_string(),
+        trigger_literal: false,
         replace: replace.to_string(),
         vars,
         source_file: PathBuf::from("test.yaml"),

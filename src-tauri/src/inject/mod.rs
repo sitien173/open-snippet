@@ -171,6 +171,8 @@ impl<S: KeyboardSink, B: ClipboardBackend> Injector<S, B> {
 mod tests {
     use std::time::Duration;
 
+    use crate::hook::winevent::test_sync::global_state_guard;
+
     use super::{InjectPlan, Injector, KeyboardAction, KeyboardSink};
 
     #[derive(Default)]
@@ -186,6 +188,7 @@ mod tests {
 
     #[test]
     fn injector_sends_backspace_then_text_with_mocked_sink() {
+        let _guard = global_state_guard();
         let sink = MockSink::default();
         let mut injector = Injector::new_with_sink(sink);
         injector
@@ -215,6 +218,7 @@ mod tests {
 
     #[test]
     fn injector_uses_unicode_for_500_ascii_chars() {
+        let _guard = global_state_guard();
         let sink = MockSink::default();
         let mut injector = Injector::new_with_sink(sink);
         let text = "a".repeat(500);
@@ -239,6 +243,7 @@ mod tests {
     #[test]
     fn clipboard_snapshot_restores_multiple_formats() {
         use crate::inject::clipboard::{capture_clipboard, restore_clipboard, set_clipboard_text};
+        let _guard = global_state_guard();
 
         set_clipboard_text("phase3-a").unwrap();
         let snapshot = capture_clipboard().unwrap();

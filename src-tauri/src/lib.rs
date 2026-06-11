@@ -201,6 +201,8 @@ pub fn run() {
             crate::commands::snippets::save_snippet,
             crate::commands::snippets::reload_snippets,
             crate::commands::snippets::list_load_errors,
+            crate::commands::snippets::get_store_settings,
+            crate::commands::snippets::set_store_settings,
             crate::commands::form::form_submit,
             crate::commands::form::form_cancel,
             crate::commands::prefs::get_prefs,

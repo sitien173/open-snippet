@@ -9,6 +9,8 @@ fn snippet(trigger: &str, id: &str) -> Snippet {
     Snippet {
         id: id.to_string(),
         trigger: trigger.to_string(),
+        raw_trigger: trigger.to_string(),
+        trigger_literal: false,
         replace: format!("replace:{id}"),
         vars: Vec::new(),
         source_file: PathBuf::from("test.yaml"),

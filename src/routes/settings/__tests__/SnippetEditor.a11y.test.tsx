@@ -6,6 +6,8 @@ import { Snippet } from "../../../lib/snippets";
 const mockSnippet: Snippet = {
   id: "snippets/default.yaml::greet",
   trigger: "greet",
+  effective_trigger: "greet",
+  trigger_literal: false,
   replace: "Hello $|$",
   vars: [],
   source_file: "F:/projects_new/textblaze/snippets/default.yaml",
