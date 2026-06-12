@@ -44,7 +44,7 @@ export const FormRoute: React.FC = () => {
           // Initialize form values
           const initialValues: Record<string, string> = {};
           found.vars.forEach((v) => {
-            if (["text", "textarea", "choice", "number"].includes(v.kind)) {
+            if (["text", "textarea", "choice", "number", "form"].includes(v.kind)) {
               let defaultValue = v.default || "";
               if (v.kind === "choice" && !v.default && v.options && v.options.length > 0) {
                 defaultValue = v.options[0];
@@ -131,7 +131,7 @@ export const FormRoute: React.FC = () => {
     let firstInvalidName: string | null = null;
 
     const formVars = snippet.vars.filter((v) =>
-      ["text", "textarea", "choice", "number"].includes(v.kind)
+      ["text", "textarea", "choice", "number", "form"].includes(v.kind)
     );
 
     for (const v of formVars) {
@@ -211,7 +211,7 @@ export const FormRoute: React.FC = () => {
   }
 
   const formVars = snippet.vars.filter((v) =>
-    ["text", "textarea", "choice", "number"].includes(v.kind)
+    ["text", "textarea", "choice", "number", "form"].includes(v.kind)
   );
 
   // Find the first focusable field index

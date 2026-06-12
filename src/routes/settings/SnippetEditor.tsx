@@ -51,10 +51,13 @@ export function SnippetEditor({ snippet, allSnippets = [], onSave, onCancel, tri
 
   const isTriggerEmpty = !trigger.trim();
   const isTriggerTooLong = trigger.length > 32;
+  const currentEffectiveTrigger = triggerLiteral
+    ? trigger
+    : (trigger.startsWith(localPrefix) ? trigger : localPrefix + trigger);
+
   const hasCollision = allSnippets.some(
     (s) =>
-      s.trigger === trigger &&
-      s.source_file === sourceFile &&
+      s.effective_trigger === currentEffectiveTrigger &&
       s.id !== snippet?.id
   );
 

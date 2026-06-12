@@ -37,6 +37,16 @@ const otherSnippets: Snippet[] = [
     vars: [],
     source_file: "F:/projects_new/textblaze/snippets/other-file.yaml",
     file_relative: "snippets/other-file.yaml",
+  },
+  {
+    id: "snippets/default.yaml::test_colon",
+    trigger: ":test",
+    effective_trigger: ":test",
+    trigger_literal: true,
+    replace: "Literal colon test",
+    vars: [],
+    source_file: "F:/projects_new/textblaze/snippets/default.yaml",
+    file_relative: "snippets/default.yaml",
   }
 ];
 
@@ -95,23 +105,44 @@ describe("SnippetEditor", () => {
 
     await user.clear(triggerInput);
     await user.type(triggerInput, "other"); // matches default.yaml::other (same file)
+    const literalToggle = screen.getByLabelText(/exact match/i);
+    await user.click(literalToggle);
 
     expect(screen.getByText(/trigger collision/i)).toBeInTheDocument();
     expect(saveButton).toBeDisabled();
   });
 
-  test("trigger collision in another file does NOT show error and does NOT disable save", async () => {
+  test("trigger collision in another file DOES show error and disables save (global effective collision)", async () => {
     const user = userEvent.setup();
-    render(<SnippetEditor snippet={mockSnippet} allSnippets={otherSnippets} />);
+    render(<SnippetEditor snippet={mockSnippet} allSnippets={otherSnippets} triggerPrefix=":" />);
 
     const triggerInput = screen.getByLabelText(/trigger/i);
     const saveButton = screen.getByRole("button", { name: /save/i });
 
     await user.clear(triggerInput);
-    await user.type(triggerInput, "greet"); // matches other-file.yaml::greet (different file)
+    
+    // Configure exact match to collide with other-file.yaml's "greet" effective trigger
+    await user.type(triggerInput, "greet");
+    const literalToggle = screen.getByLabelText(/exact match/i);
+    await user.click(literalToggle);
 
-    expect(screen.queryByText(/trigger collision/i)).not.toBeInTheDocument();
-    expect(saveButton).not.toBeDisabled();
+    expect(screen.getByText(/trigger collision/i)).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
+  });
+
+  test("prefix-sensitive duplicate triggers (e.g. literal :test vs non-literal test with prefix :) collide", async () => {
+    const user = userEvent.setup();
+    render(<SnippetEditor snippet={mockSnippet} allSnippets={otherSnippets} triggerPrefix=":" />);
+
+    const triggerInput = screen.getByLabelText(/trigger/i);
+    const saveButton = screen.getByRole("button", { name: /save/i });
+
+    // With prefix ":", effective trigger ":test" collides with otherSnippets[2]
+    await user.clear(triggerInput);
+    await user.type(triggerInput, "test");
+    
+    expect(screen.getByText(/trigger collision/i)).toBeInTheDocument();
+    expect(saveButton).toBeDisabled();
   });
 
   test("vars panel allows adding, editing (choice options), and removing variables", async () => {
@@ -215,18 +246,21 @@ describe("SnippetEditor", () => {
   });
 
   test("toggling trigger_literal to true hides hint and includes it in save payload", async () => {
-    const mockInvoke = vi.fn().mockResolvedValue(null);
+    const mockInvoke = vi.fn().mockImplementation(async (cmd) => {
+      if (cmd === "get_store_settings") return { trigger_prefix: ":" };
+      return null;
+    });
     window.__OPENMACRO_MOCK_INVOKE = mockInvoke;
 
     const user = userEvent.setup();
-    render(<SnippetEditor snippet={{ ...mockSnippet, trigger: "greet", effective_trigger: ":greet", trigger_literal: false }} allSnippets={otherSnippets} />);
+    render(<SnippetEditor snippet={{ ...mockSnippet, trigger: "greet2", effective_trigger: ":greet2", trigger_literal: false }} allSnippets={otherSnippets} triggerPrefix=":" />);
     
-    expect(screen.getByText(/:greet/)).toBeInTheDocument();
+    expect(screen.getByText(/:greet2/)).toBeInTheDocument();
 
     const literalToggle = screen.getByLabelText(/exact match/i); // assuming label "Exact match" or "Literal"
     await user.click(literalToggle);
 
-    expect(screen.queryByText(/:greet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/:greet2/)).not.toBeInTheDocument();
 
     const saveButton = screen.getByRole("button", { name: /save/i });
     await user.click(saveButton);
@@ -234,7 +268,7 @@ describe("SnippetEditor", () => {
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("save_snippet", expect.objectContaining({
         payload: expect.objectContaining({
-          trigger: "greet",
+          trigger: "greet2",
           trigger_literal: true,
           original_trigger_literal: false
         })

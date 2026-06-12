@@ -125,6 +125,33 @@ describe("Form Container Route", () => {
     file_relative: "snippets.yaml",
   };
 
+  const mockFormSnippet: Snippet = {
+    id: "form-snippet-id",
+    trigger: ";for",
+    effective_trigger: ";for",
+    trigger_literal: false,
+    replace: "Hello {{name}}! Re: {{topic}}.",
+    vars: [
+      { name: "name", kind: "form", label: "Recipient", required: true },
+      { name: "topic", kind: "form", label: "Topic", required: true },
+    ],
+    source_file: "default.yaml",
+    file_relative: "default.yaml",
+  };
+
+  const mockNestedSnippet: Snippet = {
+    id: "nested/path.yaml/;for",
+    trigger: ";for",
+    effective_trigger: ";for",
+    trigger_literal: false,
+    replace: "Nested form",
+    vars: [
+      { name: "test", kind: "form", label: "Test", required: true },
+    ],
+    source_file: "nested/path.yaml",
+    file_relative: "nested/path.yaml",
+  };
+
   let mockInvoke: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -134,7 +161,7 @@ describe("Form Container Route", () => {
 
     mockInvoke = vi.fn().mockImplementation((cmd, _args) => {
       if (cmd === "list_snippets") {
-        return Promise.resolve([mockSnippet]);
+        return Promise.resolve([mockSnippet, mockFormSnippet, mockNestedSnippet]);
       }
       if (cmd === "form_submit" || cmd === "form_cancel") {
         return Promise.resolve(null);
@@ -171,6 +198,77 @@ describe("Form Container Route", () => {
 
     // Check autofocus on first field ("First Name")
     expect(screen.getByLabelText("First Name")).toHaveFocus();
+  });
+
+  test("renders 'form' kind fields as text inputs and validates them", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/form/form-snippet-id"]}>
+        <Routes>
+          <Route path="/form/:snippetId" element={<FormRoute />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    // Wait for list_snippets to load
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("list_snippets");
+    });
+
+    // Check rendered fields
+    const nameInput = await screen.findByLabelText("Recipient");
+    const topicInput = screen.getByLabelText("Topic");
+    
+    expect(nameInput).toBeInTheDocument();
+    expect(topicInput).toBeInTheDocument();
+    
+    // Check autofocus on first field
+    expect(nameInput).toHaveFocus();
+    
+    // Try to submit empty
+    const submitBtn = screen.getByRole("button", { name: /submit/i });
+    await user.click(submitBtn);
+    
+    // Should show validation errors for both
+    expect(await screen.findByText(/recipient is required/i)).toBeInTheDocument();
+    
+    // Name input should be focused again
+    expect(nameInput).toHaveFocus();
+    
+    // Fill form
+    await user.type(nameInput, "Bob");
+    await user.type(topicInput, "Meeting");
+    
+    await user.click(submitBtn);
+    
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("form_submit", {
+        snippetId: "form-snippet-id",
+        values: {
+          name: "Bob",
+          topic: "Meeting",
+        },
+      });
+      expect(mockClose).toHaveBeenCalled();
+    });
+  });
+
+  test("decodes URL-encoded snippet IDs with slashes and matches snippet", async () => {
+    render(
+      <MemoryRouter initialEntries={["/form/nested%2Fpath.yaml%2F%3Bfor"]}>
+        <Routes>
+          <Route path="/form/:snippetId" element={<FormRoute />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    // Wait for list_snippets to load
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("list_snippets");
+    });
+
+    // If successfully decoded and matched, it should render "Test" field
+    expect(await screen.findByLabelText("Test")).toBeInTheDocument();
   });
 
   test("Enter key in input submits form if valid", async () => {

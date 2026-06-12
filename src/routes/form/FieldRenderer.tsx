@@ -22,6 +22,7 @@ export const FieldRenderer: React.FC<FieldRendererProps> = ({
 }) => {
   switch (decl.kind) {
     case "text":
+    case "form":
       return <Text decl={decl} value={value} onChange={onChange} autoFocus={autoFocus} error={error} />;
     case "textarea":
       return <Textarea decl={decl} value={value} onChange={onChange} autoFocus={autoFocus} error={error} />;
@@ -30,7 +31,7 @@ export const FieldRenderer: React.FC<FieldRendererProps> = ({
     case "number":
       return <NumberField decl={decl} value={value} onChange={onChange} autoFocus={autoFocus} error={error} />;
     default:
-      // Skip non-form kinds (datetime, clipboard, cursor, shell, form) defensively.
+      // Skip non-form kinds (datetime, clipboard, cursor, shell) defensively.
       return null;
   }
 };
