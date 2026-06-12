@@ -51,8 +51,21 @@ export function SyncPanel() {
     if (!remote.trim()) {
       return "Remote URL is required.";
     }
-    if (authChoice === "https" && !pat.trim()) {
-      return "PAT is required for HTTPS.";
+    if (authChoice === "https") {
+      if (!remote.trim().toLowerCase().startsWith("https://")) {
+        return "HTTPS is required for this authentication mode.";
+      }
+      try {
+        const url = new URL(remote.trim());
+        if (!url.hostname) {
+          return "Invalid HTTPS URL.";
+        }
+      } catch {
+        return "Invalid HTTPS URL.";
+      }
+      if (!pat.trim()) {
+        return "PAT is required for HTTPS.";
+      }
     }
     return null;
   };

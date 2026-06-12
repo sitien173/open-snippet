@@ -246,4 +246,41 @@ describe("PrefsPanel", () => {
     // Notice should disappear
     expect(screen.queryByText(/Snippets now expand on Tab\/Enter/i)).not.toBeInTheDocument();
   });
+
+  test("autostart save failure rolls back toggle and shows error", async () => {
+    const mockInvoke = vi.fn().mockImplementation(async (cmd: string) => {
+      if (cmd === "get_prefs") {
+        return { paused: false, autostart: false, max_expansion_len: 1000, shell_consent: false };
+      }
+      if (cmd === "get_store_settings") {
+        return { trigger_prefix: ":" };
+      }
+      if (cmd === "list_snippets") {
+        return [];
+      }
+      if (cmd === "set_prefs") {
+        return Promise.reject("Backend rejected autostart");
+      }
+      return null;
+    });
+    window.__OPENMACRO_MOCK_INVOKE = mockInvoke;
+
+    const user = userEvent.setup();
+    render(<PrefsPanel />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Loading/i)).not.toBeInTheDocument();
+    });
+
+    const autostartCheckbox = screen.getByLabelText(/Start on system boot/i) as HTMLInputElement;
+    expect(autostartCheckbox.checked).toBe(false);
+
+    await user.click(autostartCheckbox);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error saving/i)).toBeInTheDocument();
+    });
+
+    expect(autostartCheckbox.checked).toBe(false);
+  });
 });

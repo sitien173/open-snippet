@@ -72,7 +72,7 @@ log.methodFactory = (methodName, logLevel, loggerName) => {
     if (ring.length > RING_CAP) {
       ring.shift();
     }
-    raw(msg, fields ?? "");
+    raw(msg, entry.fields ?? "");
   };
 };
 

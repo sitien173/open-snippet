@@ -89,6 +89,27 @@ describe("logger frontend module", () => {
     });
   });
 
+  test("redacts sensitive keys in underlying console output by default", () => {
+    const log = getLogger("console-redact-module");
+
+    const spyDebug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const spyLog = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    // Force loglevel to re-bind to the spied console methods
+    log.setLevel("debug");
+
+    log.debug("console redact test", { secret: "do-not-print-me" });
+
+    const calls = [...spyDebug.mock.calls, ...spyLog.mock.calls];
+    const allArgsStr = JSON.stringify(calls);
+
+    expect(allArgsStr).toContain("<redacted len=15>");
+    expect(allArgsStr).not.toContain("do-not-print-me");
+
+    spyDebug.mockRestore();
+    spyLog.mockRestore();
+  });
+
   test("correctly counts code-points for unicode in redaction", () => {
     const log = getLogger("unicode-module");
     log.setLevel("debug");

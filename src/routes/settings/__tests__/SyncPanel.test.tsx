@@ -66,6 +66,21 @@ describe("SyncPanel", () => {
     );
   });
 
+  test("non-https remote for https auth shows inline error", async () => {
+    const user = userEvent.setup();
+    render(<SyncPanel />);
+
+    await user.type(screen.getByLabelText(/remote url/i), "http://example.com/repo.git");
+    await user.type(screen.getByLabelText(/personal access token/i), "pat-123");
+    await user.click(screen.getByRole("button", { name: /save & init/i }));
+
+    expect(screen.getByText(/HTTPS is required for this authentication mode/i)).toBeInTheDocument();
+    expect(window.__OPENMACRO_MOCK_INVOKE).not.toHaveBeenCalledWith(
+      "sync_init",
+      expect.anything(),
+    );
+  });
+
   test("sync now shows tick result", async () => {
     render(<SyncPanel />);
 
@@ -75,5 +90,20 @@ describe("SyncPanel", () => {
       expect(window.__OPENMACRO_MOCK_INVOKE).toHaveBeenCalledWith("sync_tick_now");
       expect(screen.getByText(/last result: synced/i)).toBeInTheDocument();
     });
+  });
+
+  test("malformed https remote shows inline error and blocks IPC", async () => {
+    const user = userEvent.setup();
+    render(<SyncPanel />);
+
+    await user.type(screen.getByLabelText(/remote url/i), "https://");
+    await user.type(screen.getByLabelText(/personal access token/i), "pat-123");
+    await user.click(screen.getByRole("button", { name: /save & init/i }));
+
+    expect(screen.getByText(/Invalid HTTPS URL/i)).toBeInTheDocument();
+    expect(window.__OPENMACRO_MOCK_INVOKE).not.toHaveBeenCalledWith(
+      "sync_init",
+      expect.anything(),
+    );
   });
 });

@@ -45,6 +45,7 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
   }, [triggerPrefix]);
 
   const persistPrefs = async (updated: Prefs) => {
+    const previous = prefs;
     setPrefsState(updated);
     setSaveStatus("Saving...");
     try {
@@ -52,6 +53,9 @@ export function PrefsPanel({ triggerPrefix, onPrefixSaved }: PrefsPanelProps = {
       setSaveStatus("Saved");
       setTimeout(() => setSaveStatus(null), 2000);
     } catch (err) {
+      if (previous) {
+        setPrefsState(previous);
+      }
       setSaveStatus("Error saving");
       log.error("Failed to persist preferences", { error: err });
     }
