@@ -579,6 +579,7 @@ fn run_hook_thread(
     use windows::Win32::{
         Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
         UI::{
+            Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK},
             Input::KeyboardAndMouse::{
                 GetKeyState, GetKeyboardLayout, GetKeyboardState, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
                 VK_RCONTROL, VK_RMENU, VK_RSHIFT,
@@ -586,7 +587,8 @@ fn run_hook_thread(
             WindowsAndMessaging::{
                 CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW,
                 GetWindowThreadProcessId, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx,
-                HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+                EVENT_SYSTEM_FOREGROUND, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
+                WINEVENT_OUTOFCONTEXT, WM_KEYDOWN, WM_SYSKEYDOWN,
             },
         },
     };
@@ -626,6 +628,26 @@ fn run_hook_thread(
 
         // SAFETY: forwarding hook events to the next hook is required by the hook contract.
         unsafe { CallNextHookEx(HHOOK::default(), code, wparam, lparam) }
+    }
+
+    unsafe extern "system" fn foreground_proc(
+        _hook: HWINEVENTHOOK,
+        _event: u32,
+        hwnd: windows::Win32::Foundation::HWND,
+        _id_object: i32,
+        _id_child: i32,
+        _thread: u32,
+        _time: u32,
+    ) {
+        let producer_ptr = HOOK_PRODUCER.load(Ordering::Relaxed);
+        if producer_ptr.is_null() {
+            return;
+        }
+        if let Some(event) = crate::hook::winevent::foreground_event_from_hwnd(hwnd.0 as isize) {
+            // SAFETY: callback thread stores a valid HookProducer pointer before hook install and clears it on teardown.
+            let producer = unsafe { &mut *producer_ptr };
+            let _ = emit_hook_event(producer, event);
+        }
     }
 
     fn translate_key(vk_code: u32, scan_code: u32) -> Option<char> {
@@ -706,6 +728,17 @@ fn run_hook_thread(
             return Err(error);
         }
     };
+    let win_event_hook = unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            HINSTANCE::default(),
+            Some(foreground_proc),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT,
+        )
+    };
 
     let mut message = MSG::default();
     // SAFETY: standard message pump for the hook thread.
@@ -720,6 +753,7 @@ fn run_hook_thread(
     // SAFETY: hook handle was returned by SetWindowsHookExW and remains valid until thread teardown.
     unsafe {
         UnhookWindowsHookEx(hook)?;
+        let _ = UnhookWinEvent(win_event_hook);
     }
     HOOK_PRODUCER.store(ptr::null_mut(), Ordering::Relaxed);
     Ok(())

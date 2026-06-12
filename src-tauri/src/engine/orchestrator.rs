@@ -386,25 +386,6 @@ impl<
             return Ok(false);
         };
 
-        let mut injector = self.injector.lock().unwrap();
-        let prefs = self.prefs.read().unwrap().clone();
-        let resolver = Resolver::new(&prefs)
-            .with_notify_sink(&self.notifier)
-            .with_shell_backend(self.shell_backend.as_ref());
-        let resolved = match resolver.resolve(snippet, injector.clipboard_mut(), None) {
-            Ok(resolved) => resolved,
-            Err(ResolveError::UnknownPlaceholder { name }) => {
-                self.buffer.reset();
-                self.notifier.unknown_placeholder(&snippet.id, &name);
-                return Ok(false);
-            }
-            Err(_) => return Ok(false),
-        };
-
-        if resolved.text.chars().count() > self.max_expansion_len {
-            return Ok(false);
-        }
-
         if snippet.vars.iter().any(|var| var.kind == VarKind::Form) {
             let Some(hwnd) = self.focus.capture_foreground() else {
                 self.buffer.reset();
@@ -466,6 +447,25 @@ impl<
             return Ok(true);
         }
 
+        let mut injector = self.injector.lock().unwrap();
+        let prefs = self.prefs.read().unwrap().clone();
+        let resolver = Resolver::new(&prefs)
+            .with_notify_sink(&self.notifier)
+            .with_shell_backend(self.shell_backend.as_ref());
+        let resolved = match resolver.resolve(snippet, injector.clipboard_mut(), None) {
+            Ok(resolved) => resolved,
+            Err(ResolveError::UnknownPlaceholder { name }) => {
+                self.buffer.reset();
+                self.notifier.unknown_placeholder(&snippet.id, &name);
+                return Ok(false);
+            }
+            Err(_) => return Ok(false),
+        };
+
+        if resolved.text.chars().count() > self.max_expansion_len {
+            return Ok(false);
+        }
+
         self.buffer.reset();
         injector.inject(InjectPlan {
             backspaces: trigger_len_chars,
@@ -503,14 +503,15 @@ mod tests {
         commands::prefs::Prefs,
         expand::{
             shell::{ShellBackend, ShellError},
-            ResolveNotifySink,
+            ClipboardReader, ResolveNotifySink,
         },
         form::{
-            FocusBackend, FocusError, ForegroundWindow, FormRunner, NoopFocusBackend,
-            NoopWindowSink,
+            FocusBackend, FocusError, ForegroundWindow, FormError, FormRunner, NoopFocusBackend,
+            NoopWindowSink, WindowSink,
         },
         hook::{winevent::set_denylisted, HookEvent, ResetCause},
         inject::{
+            clipboard::{ClipboardBackend, ClipboardPasteResult},
             clipboard::{MockClipboardBackend, TestClipboardBackend},
             Injector, KeyboardAction, KeyboardSink,
         },
@@ -527,6 +528,47 @@ mod tests {
     impl KeyboardSink for MockSink {
         fn send(&mut self, action: KeyboardAction) {
             self.actions.push(action);
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingClipboardBackend {
+        text: Option<String>,
+        reads: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RecordingClipboardBackend {
+        fn with_text(text: impl Into<String>) -> Self {
+            Self {
+                text: Some(text.into()),
+                reads: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn reads(&self) -> Vec<String> {
+            self.reads.lock().unwrap().clone()
+        }
+    }
+
+    impl ClipboardReader for RecordingClipboardBackend {
+        fn read_text(&mut self) -> Option<String> {
+            let text = self.text.clone();
+            self.reads
+                .lock()
+                .unwrap()
+                .push(text.clone().unwrap_or_default());
+            text
+        }
+    }
+
+    impl ClipboardBackend for RecordingClipboardBackend {
+        fn paste(
+            &mut self,
+            _sink: &mut dyn KeyboardSink,
+            _text: &str,
+            _timeout: std::time::Duration,
+        ) -> ClipboardPasteResult {
+            ClipboardPasteResult::Pasted
         }
     }
 
@@ -592,6 +634,24 @@ mod tests {
 
         fn restore_foreground(&self, hwnd: ForegroundWindow) -> Result<(), FocusError> {
             self.restored.lock().unwrap().push(hwnd);
+            Ok(())
+        }
+    }
+
+    #[derive(Default, Clone)]
+    struct RecordingWindowSink {
+        opened: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl RecordingWindowSink {
+        fn opened(&self) -> Vec<String> {
+            self.opened.lock().unwrap().clone()
+        }
+    }
+
+    impl WindowSink for RecordingWindowSink {
+        fn open_form(&self, snippet_id: &str, _hwnd: ForegroundWindow) -> Result<(), FormError> {
+            self.opened.lock().unwrap().push(snippet_id.to_string());
             Ok(())
         }
     }
@@ -980,5 +1040,224 @@ mod tests {
 
         assert!(orchestrator.injector().sink().actions.is_empty());
         assert!(restored.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn form_cancel_skips_shell_and_clipboard_side_effects() {
+        let _guard = test_guard();
+        let injector = Injector::new_with_parts(
+            MockSink::default(),
+            RecordingClipboardBackend::with_text("copied"),
+        );
+        let runner = Arc::new(FormRunner::new_with_sink(NoopWindowSink));
+        let shell_backend = Arc::new(MockShellBackend::new("shell"));
+        let prefs = Arc::new(RwLock::new(Prefs {
+            shell_consent: true,
+            ..Prefs::default()
+        }));
+        let focus = Arc::new(MockFocusBackend {
+            captured: Some(ForegroundWindow(55)),
+            restored: Arc::default(),
+        });
+        let mut orchestrator = Orchestrator::new_with_state(
+            vec![snippet_with_vars(
+                ";form",
+                "{{clip}} {{out}} {{name}}",
+                vec![
+                    VarDecl {
+                        name: "clip".to_string(),
+                        kind: VarKind::Clipboard,
+                        label: None,
+                        default: None,
+                        required: false,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: Vec::new(),
+                        timeout_ms: None,
+                        confirm: false,
+                    },
+                    VarDecl {
+                        name: "out".to_string(),
+                        kind: VarKind::Shell,
+                        label: None,
+                        default: None,
+                        required: false,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: vec![
+                            "cmd".to_string(),
+                            "/c".to_string(),
+                            "echo hello".to_string(),
+                        ],
+                        timeout_ms: Some(200),
+                        confirm: false,
+                    },
+                    VarDecl {
+                        name: "name".to_string(),
+                        kind: VarKind::Form,
+                        label: Some("Name".to_string()),
+                        default: None,
+                        required: true,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: Vec::new(),
+                        timeout_ms: None,
+                        confirm: false,
+                    },
+                ],
+            )],
+            injector,
+            NoopNotifySink,
+            tokio::runtime::Handle::current(),
+            Arc::clone(&runner),
+            focus,
+            prefs,
+            shell_backend.clone(),
+        );
+        set_auto_mode(&mut orchestrator);
+
+        for ch in ";form".chars() {
+            let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
+        }
+        tokio::task::yield_now().await;
+        runner.cancel("test::;form");
+        tokio::task::yield_now().await;
+
+        assert!(orchestrator.injector().sink().actions.is_empty());
+        assert!(shell_backend.calls().is_empty());
+        assert!(orchestrator.injector().clipboard_mut().reads().is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn form_submit_resolves_shell_and_clipboard_once_after_submit() {
+        let _guard = test_guard();
+        let window_sink = RecordingWindowSink::default();
+        let runner = Arc::new(FormRunner::new_with_sink(window_sink.clone()));
+        let injector = Injector::new_with_parts(
+            MockSink::default(),
+            RecordingClipboardBackend::with_text("copied"),
+        );
+        let shell_backend = Arc::new(MockShellBackend::new("shell"));
+        let prefs = Arc::new(RwLock::new(Prefs {
+            shell_consent: true,
+            ..Prefs::default()
+        }));
+        let restored = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let focus = Arc::new(MockFocusBackend {
+            captured: Some(ForegroundWindow(99)),
+            restored: Arc::clone(&restored),
+        });
+        let mut orchestrator = Orchestrator::new_with_state(
+            vec![snippet_with_vars(
+                ";form",
+                "{{clip}} {{out}} {{name}}",
+                vec![
+                    VarDecl {
+                        name: "clip".to_string(),
+                        kind: VarKind::Clipboard,
+                        label: None,
+                        default: None,
+                        required: false,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: Vec::new(),
+                        timeout_ms: None,
+                        confirm: false,
+                    },
+                    VarDecl {
+                        name: "out".to_string(),
+                        kind: VarKind::Shell,
+                        label: None,
+                        default: None,
+                        required: false,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: vec![
+                            "cmd".to_string(),
+                            "/c".to_string(),
+                            "echo hello".to_string(),
+                        ],
+                        timeout_ms: Some(200),
+                        confirm: false,
+                    },
+                    VarDecl {
+                        name: "name".to_string(),
+                        kind: VarKind::Form,
+                        label: Some("Name".to_string()),
+                        default: None,
+                        required: true,
+                        options: Vec::new(),
+                        format: None,
+                        cmd: Vec::new(),
+                        timeout_ms: None,
+                        confirm: false,
+                    },
+                ],
+            )],
+            injector,
+            NoopNotifySink,
+            tokio::runtime::Handle::current(),
+            Arc::clone(&runner),
+            focus,
+            prefs,
+            shell_backend.clone(),
+        );
+        set_auto_mode(&mut orchestrator);
+
+        for ch in ";form".chars() {
+            let _ = orchestrator.handle_event(HookEvent::Char(ch)).unwrap();
+        }
+        tokio::task::yield_now().await;
+
+        assert!(shell_backend.calls().is_empty());
+        assert!(orchestrator.injector().clipboard_mut().reads().is_empty());
+        assert_eq!(window_sink.opened(), vec!["test::;form".to_string()]);
+
+        runner.submit(
+            "test::;form",
+            std::collections::BTreeMap::from([("name".to_string(), "Ada".to_string())]),
+        );
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+
+        assert_eq!(
+            shell_backend.calls(),
+            vec![vec![
+                "cmd".to_string(),
+                "/c".to_string(),
+                "echo hello".to_string()
+            ]]
+        );
+        assert_eq!(
+            orchestrator.injector().clipboard_mut().reads(),
+            vec!["copied".to_string()]
+        );
+        assert_eq!(restored.lock().unwrap().as_slice(), &[ForegroundWindow(99)]);
+        assert_eq!(
+            orchestrator.injector().sink().actions,
+            vec![
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Backspace,
+                KeyboardAction::Unicode('c'),
+                KeyboardAction::Unicode('o'),
+                KeyboardAction::Unicode('p'),
+                KeyboardAction::Unicode('i'),
+                KeyboardAction::Unicode('e'),
+                KeyboardAction::Unicode('d'),
+                KeyboardAction::Unicode(' '),
+                KeyboardAction::Unicode('s'),
+                KeyboardAction::Unicode('h'),
+                KeyboardAction::Unicode('e'),
+                KeyboardAction::Unicode('l'),
+                KeyboardAction::Unicode('l'),
+                KeyboardAction::Unicode(' '),
+                KeyboardAction::Unicode('A'),
+                KeyboardAction::Unicode('d'),
+                KeyboardAction::Unicode('a'),
+            ]
+        );
     }
 }

@@ -50,7 +50,7 @@ impl<R: Runtime> AppWindowSink<R> {
 
 impl<R: Runtime> WindowSink for AppWindowSink<R> {
     fn open_form(&self, snippet_id: &str, hwnd: ForegroundWindow) -> Result<(), FormError> {
-        let url = WebviewUrl::App(format!("/form/{snippet_id}").into());
+        let url = WebviewUrl::App(form_route(snippet_id).into());
         let (x, y) = monitor_center(hwnd, 400, 240);
         let mut builder = WebviewWindowBuilder::new(&self.0, "form", url)
             .decorations(false)
@@ -65,6 +65,26 @@ impl<R: Runtime> WindowSink for AppWindowSink<R> {
             .map_err(|error| FormError::Window(error.to_string()))?;
         Ok(())
     }
+}
+
+fn form_route(snippet_id: &str) -> String {
+    format!("/form/{}", encode_path_segment(snippet_id))
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => {
+                use std::fmt::Write as _;
+                let _ = write!(&mut encoded, "%{byte:02X}");
+            }
+        }
+    }
+    encoded
 }
 
 #[derive(Default)]
@@ -196,6 +216,17 @@ fn form_outcome_label(outcome: &FormOutcome) -> &'static str {
     match outcome {
         FormOutcome::Submitted(_) => "submitted",
         FormOutcome::Cancelled => "cancelled",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn form_route_percent_encodes_snippet_ids() {
+        assert_eq!(
+            super::form_route("folder/snippet:hi snowman \u{2603}"),
+            "/form/folder%2Fsnippet%3Ahi%20snowman%20%E2%98%83"
+        );
     }
 }
 

@@ -9,6 +9,8 @@ use super::{InjectError, KeyboardSink};
 const CF_TEXT_FORMAT: u32 = 1;
 const CF_UNICODETEXT_FORMAT: u32 = 13;
 #[cfg(windows)]
+const CLIPBOARD_OPEN_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(windows)]
 const POST_PASTE_RESTORE_DELAY: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone)]
@@ -39,13 +41,19 @@ impl ClipboardSnapshot {
     }
 }
 
+pub enum ClipboardPasteResult {
+    Pasted,
+    PastedRestoreFailed(InjectError),
+    Failed(InjectError),
+}
+
 pub trait ClipboardBackend: ClipboardReader + Send + 'static {
     fn paste(
         &mut self,
         sink: &mut dyn KeyboardSink,
         text: &str,
         timeout: Duration,
-    ) -> Result<(), InjectError>;
+    ) -> ClipboardPasteResult;
 }
 
 pub struct MockClipboardBackend;
@@ -62,7 +70,7 @@ impl ClipboardBackend for MockClipboardBackend {
         sink: &mut dyn KeyboardSink,
         text: &str,
         _timeout: Duration,
-    ) -> Result<(), InjectError> {
+    ) -> ClipboardPasteResult {
         // SECURITY: clipboard payload is user content; log redacted text only.
         tracing::debug!(
             text = %crate::log_init::redact::redact_str(
@@ -72,8 +80,8 @@ impl ClipboardBackend for MockClipboardBackend {
             chars = text.chars().count(),
             "mock clipboard paste"
         );
-        let _ = sink;
-        Ok(())
+        sink.send(crate::inject::KeyboardAction::Paste(text.to_string()));
+        ClipboardPasteResult::Pasted
     }
 }
 
@@ -111,7 +119,7 @@ impl ClipboardBackend for SystemClipboardBackend {
         sink: &mut dyn KeyboardSink,
         text: &str,
         timeout: Duration,
-    ) -> Result<(), InjectError> {
+    ) -> ClipboardPasteResult {
         #[cfg(windows)]
         {
             // SECURITY: clipboard payload is user content; log redacted text only.
@@ -123,20 +131,30 @@ impl ClipboardBackend for SystemClipboardBackend {
                 chars = text.chars().count(),
                 "system clipboard paste"
             );
-            let snapshot = capture_clipboard()?;
-            let _guard = ClipboardGuard::open(timeout)?;
-            clear_clipboard()?;
-            set_clipboard_text_internal(text)?;
-            let _ = sink;
+            let snapshot = match capture_clipboard_with_timeout(timeout) {
+                Ok(snapshot) => snapshot,
+                Err(error) => return ClipboardPasteResult::Failed(error),
+            };
+            if let Err(error) = set_clipboard_text_with_timeout(text, timeout) {
+                if let Err(restore_error) = restore_clipboard_with_timeout(&snapshot, timeout) {
+                    return ClipboardPasteResult::Failed(InjectError::new(format!(
+                        "{error}; restore failed: {restore_error}"
+                    )));
+                }
+                return ClipboardPasteResult::Failed(error);
+            }
+            sink.send(crate::inject::KeyboardAction::Paste(text.to_string()));
             thread::sleep(POST_PASTE_RESTORE_DELAY);
-            restore_clipboard(&snapshot)?;
-            Ok(())
+            match restore_clipboard_with_timeout(&snapshot, timeout) {
+                Ok(()) => ClipboardPasteResult::Pasted,
+                Err(error) => ClipboardPasteResult::PastedRestoreFailed(error),
+            }
         }
 
         #[cfg(not(windows))]
         {
             let _ = (sink, text, timeout);
-            Err(InjectError::new(
+            ClipboardPasteResult::Failed(InjectError::new(
                 "clipboard paste unsupported on this platform",
             ))
         }
@@ -168,7 +186,7 @@ impl ClipboardBackend for TestClipboardBackend {
         sink: &mut dyn KeyboardSink,
         text: &str,
         _timeout: Duration,
-    ) -> Result<(), InjectError> {
+    ) -> ClipboardPasteResult {
         // SECURITY: clipboard payload is user content; log redacted text only.
         tracing::debug!(
             text = %crate::log_init::redact::redact_str(
@@ -178,8 +196,8 @@ impl ClipboardBackend for TestClipboardBackend {
             chars = text.chars().count(),
             "test clipboard paste"
         );
-        let _ = sink;
-        Ok(())
+        sink.send(crate::inject::KeyboardAction::Paste(text.to_string()));
+        ClipboardPasteResult::Pasted
     }
 }
 
@@ -223,9 +241,14 @@ impl Drop for ClipboardGuard {
 
 #[cfg(windows)]
 pub fn capture_clipboard() -> Result<ClipboardSnapshot, InjectError> {
+    capture_clipboard_with_timeout(CLIPBOARD_OPEN_TIMEOUT)
+}
+
+#[cfg(windows)]
+fn capture_clipboard_with_timeout(timeout: Duration) -> Result<ClipboardSnapshot, InjectError> {
     use windows::Win32::System::DataExchange::{EnumClipboardFormats, GetClipboardData};
 
-    let _guard = ClipboardGuard::open(Duration::from_millis(50))?;
+    let _guard = ClipboardGuard::open(timeout)?;
     let mut formats = Vec::new();
     let mut format = 0u32;
 
@@ -255,7 +278,20 @@ pub fn capture_clipboard() -> Result<ClipboardSnapshot, InjectError> {
 
 #[cfg(windows)]
 pub fn restore_clipboard(snapshot: &ClipboardSnapshot) -> Result<(), InjectError> {
-    let _guard = ClipboardGuard::open(Duration::from_millis(50))?;
+    restore_clipboard_with_timeout(snapshot, CLIPBOARD_OPEN_TIMEOUT)
+}
+
+#[cfg(windows)]
+fn restore_clipboard_with_timeout(
+    snapshot: &ClipboardSnapshot,
+    timeout: Duration,
+) -> Result<(), InjectError> {
+    let _guard = ClipboardGuard::open(timeout)?;
+    restore_clipboard_internal(snapshot)
+}
+
+#[cfg(windows)]
+fn restore_clipboard_internal(snapshot: &ClipboardSnapshot) -> Result<(), InjectError> {
     clear_clipboard()?;
 
     for format in &snapshot.formats {
@@ -266,7 +302,12 @@ pub fn restore_clipboard(snapshot: &ClipboardSnapshot) -> Result<(), InjectError
 
 #[cfg(windows)]
 pub fn set_clipboard_text(text: &str) -> Result<(), InjectError> {
-    let _guard = ClipboardGuard::open(Duration::from_millis(50))?;
+    set_clipboard_text_with_timeout(text, CLIPBOARD_OPEN_TIMEOUT)
+}
+
+#[cfg(windows)]
+fn set_clipboard_text_with_timeout(text: &str, timeout: Duration) -> Result<(), InjectError> {
+    let _guard = ClipboardGuard::open(timeout)?;
     clear_clipboard()?;
     set_clipboard_text_internal(text)
 }
