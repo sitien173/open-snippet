@@ -1,0 +1,62 @@
+version: 1
+snippets:
+- trigger: ;sig
+  replace: |-
+    Best,
+    — $|$
+  vars: []
+- trigger: ;now
+  replace: It is {{date}} at {{time}} right now.
+  vars: []
+- trigger: ;log
+  replace: console.log("$|$");
+  vars: []
+- trigger: ;for
+  replace: |-
+    Hello {{name}}! Re: {{topic}}.
+
+    $|$
+  vars:
+  - name: name
+    kind: form
+    label: Recipient
+    default: null
+    required: true
+    options: []
+    format: null
+    cmd: []
+    timeout_ms: null
+    confirm: false
+  - name: topic
+    kind: form
+    label: Topic
+    default: null
+    required: true
+    options: []
+    format: null
+    cmd: []
+    timeout_ms: null
+    confirm: false
+- trigger: ;head
+  replace: '// Current branch: {{branch}}'
+  vars:
+  - name: branch
+    kind: shell
+    label: null
+    default: null
+    required: false
+    options: []
+    format: null
+    cmd:
+    - git
+    - rev-parse
+    - --abbrev-ref
+    - HEAD
+    timeout_ms: 2000
+    confirm: false
+- trigger: :test
+  replace: Tien Ngo Test
+  vars: []
+- trigger: ;test
+  replace: TienNgo
+  vars: []

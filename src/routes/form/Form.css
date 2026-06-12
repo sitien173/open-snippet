@@ -1,0 +1,141 @@
+.form-root {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: var(--space-md);
+  background-color: var(--color-canvas);
+  color: var(--color-text-default);
+  width: 100%;
+  min-height: 100vh;
+}
+
+.form-header {
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border-subdued);
+  padding-bottom: var(--space-xs);
+}
+
+.form-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--type-text-lg-size);
+  line-height: var(--type-text-lg-lh);
+  font-weight: var(--type-display-weight);
+  color: var(--color-text-display);
+}
+
+.form-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subdued);
+  border-radius: var(--radius-xs);
+  padding: var(--space-md);
+  box-shadow: var(--elev-depth4);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+}
+
+.form-field label {
+  font-family: var(--font-sans);
+  font-size: var(--type-label-sm-size);
+  line-weight: var(--type-label-sm-weight);
+  color: var(--color-text-subdued);
+  text-align: left;
+}
+
+.form-field input[type="text"],
+.form-field input[type="number"],
+.form-field textarea,
+.form-field select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-default);
+  background-color: var(--color-surface);
+  color: var(--color-text-default);
+  font-family: var(--font-sans);
+  font-size: var(--type-text-sm-size);
+  line-height: var(--type-text-sm-lh);
+  outline: none;
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.form-field input[type="text"]:focus,
+.form-field input[type="number"]:focus,
+.form-field textarea:focus,
+.form-field select:focus {
+  border-color: var(--color-action-interactive);
+  outline: 2px solid var(--color-action-interactive);
+  outline-offset: 2px;
+}
+
+.form-field .field-error-msg {
+  color: var(--color-text-red);
+  font-size: var(--type-text-xs-size);
+  margin-top: 2px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.form-field.has-error input[type="text"],
+.form-field.has-error input[type="number"],
+.form-field.has-error textarea,
+.form-field.has-error select {
+  border-color: var(--color-border-red);
+}
+
+.form-field.has-error input[type="text"]:focus,
+.form-field.has-error input[type="number"]:focus,
+.form-field.has-error textarea:focus,
+.form-field.has-error select:focus {
+  outline: 2px solid var(--color-border-red);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+  border-top: 1px solid var(--color-border-subdued);
+  padding-top: var(--space-sm);
+}
+
+.btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-xs);
+  font-size: var(--type-button-md-size);
+  font-weight: var(--type-button-md-weight);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard);
+  box-shadow: var(--elev-button);
+}
+
+.btn-secondary {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-default);
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-action-outline-hover);
+}
+
+.btn-primary {
+  background-color: var(--color-action-primary);
+  border: 1px solid var(--color-action-primary);
+  color: var(--color-text-inverse);
+}
+
+.btn-primary:hover {
+  background-color: var(--color-action-primary-hover);
+  border-color: var(--color-action-primary-hover);
+}
