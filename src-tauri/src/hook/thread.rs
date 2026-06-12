@@ -224,14 +224,14 @@ mod tests {
             "marked injected events should be ignored when suspend is true"
         );
 
-        // 2. Unmarked injected events are not ignored solely due to LLKHF_INJECTED_FLAG
+        // 2. While suspend is active, any injected event should be ignored.
         assert!(
             !should_ignore_event(false, LLKHF_INJECTED_FLAG, 0),
             "unmarked injected events should not be ignored when suspend is false"
         );
         assert!(
-            !should_ignore_event(true, LLKHF_INJECTED_FLAG, 0),
-            "unmarked injected events should not be ignored when suspend is true"
+            should_ignore_event(true, LLKHF_INJECTED_FLAG, 0),
+            "unmarked injected events should be ignored when suspend is true"
         );
 
         // 3. Non-injected events are not ignored
@@ -564,8 +564,9 @@ fn disarms_confirm_armed(event: HookEvent) -> bool {
     )
 }
 
-fn should_ignore_event(_suspend: bool, flags: u32, dw_extra_info: usize) -> bool {
-    (flags & LLKHF_INJECTED_FLAG) != 0 && dw_extra_info == crate::inject::sendinput::INJECTED_MARKER
+fn should_ignore_event(suspend: bool, flags: u32, dw_extra_info: usize) -> bool {
+    (flags & LLKHF_INJECTED_FLAG) != 0
+        && (suspend || dw_extra_info == crate::inject::sendinput::INJECTED_MARKER)
 }
 
 #[cfg(windows)]
