@@ -1,7 +1,7 @@
 # Security Review Remediation Plan
 
 Created: 2026-06-12
-Status: ACTIVE
+Status: DONE
 Source: 2026-06-12 code review findings
 
 ## Superpowers Route
@@ -296,4 +296,3 @@ Privacy and CI should prevent the same class of regressions:
 - Workers must write RED-to-GREEN evidence into phase notes and journals.
 - Do not pre-create `phase-NN/` directories. The executor creates them lazily.
 - Keep unrelated repo changes, especially existing `.agents/` files, out of this plan unless the executor requires them for worker dispatch.
-

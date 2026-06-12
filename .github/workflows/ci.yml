@@ -27,6 +27,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Frontend build
+        run: pnpm build
+
+      - name: Cargo fmt
+        run: cargo fmt --check
+        working-directory: src-tauri
+
       - name: Cargo test
         run: cargo test --all-features -- --test-threads=1
         working-directory: src-tauri

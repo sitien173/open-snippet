@@ -219,17 +219,6 @@ fn form_outcome_label(outcome: &FormOutcome) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn form_route_percent_encodes_snippet_ids() {
-        assert_eq!(
-            super::form_route("folder/snippet:hi snowman \u{2603}"),
-            "/form/folder%2Fsnippet%3Ahi%20snowman%20%E2%98%83"
-        );
-    }
-}
-
 #[cfg(windows)]
 fn monitor_center(hwnd: ForegroundWindow, width: i32, height: i32) -> (Option<i32>, Option<i32>) {
     use windows::Win32::{
@@ -275,4 +264,15 @@ fn monitor_center(
     _height: i32,
 ) -> (Option<i32>, Option<i32>) {
     (None, None)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn form_route_percent_encodes_snippet_ids() {
+        assert_eq!(
+            super::form_route("folder/snippet:hi snowman \u{2603}"),
+            "/form/folder%2Fsnippet%3Ahi%20snowman%20%E2%98%83"
+        );
+    }
 }
