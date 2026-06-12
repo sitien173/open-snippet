@@ -39,6 +39,57 @@ pub fn credential_key(host: &str) -> String {
     format!("openmacro/sync/{host}")
 }
 
+pub fn validate_https_pat_remote(remote: &str, auth: &AuthMode) -> Result<(), String> {
+    if let AuthMode::HttpsPat { host, .. } = auth {
+        let remote_host = https_remote_host(remote)?;
+        if normalize_host(host) != normalize_host(&remote_host) {
+            return Err(format!(
+                "remote host mismatch: expected {host}, got {remote_host}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_credential_callback_url(auth: &AuthMode, url: &str) -> Result<(), String> {
+    if let AuthMode::HttpsPat { host, .. } = auth {
+        let url_host = https_remote_host(url)?;
+        if normalize_host(host) != normalize_host(&url_host) {
+            return Err(format!(
+                "credential URL host mismatch: expected {host}, got {url_host}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn https_remote_host(remote: &str) -> Result<String, String> {
+    let Some((scheme, rest)) = remote.split_once("://") else {
+        return Err("HTTPS PAT auth requires an https remote URL".to_string());
+    };
+    if !scheme.eq_ignore_ascii_case("https") {
+        return Err("HTTPS PAT auth requires an https remote URL".to_string());
+    }
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host_port = authority.rsplit('@').next().unwrap_or(authority);
+    let host = if let Some(ipv6_end) = host_port
+        .strip_prefix('[')
+        .and_then(|value| value.find(']'))
+    {
+        &host_port[1..=ipv6_end]
+    } else {
+        host_port.split(':').next().unwrap_or_default()
+    };
+    if host.is_empty() {
+        return Err("HTTPS PAT auth requires a remote host".to_string());
+    }
+    Ok(host.to_string())
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
 #[derive(Default)]
 pub struct WindowsCredentialStore;
 
@@ -152,8 +203,10 @@ pub fn git_remote_callbacks<'a>(
     store: &'a dyn CredentialStore,
 ) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.credentials(move |_url, username_from_url, allowed| match auth {
+    callbacks.credentials(move |url, username_from_url, allowed| match auth {
         AuthMode::HttpsPat { host, username } => {
+            validate_credential_callback_url(auth, url)
+                .map_err(|error| git2::Error::from_str(&error))?;
             tracing::debug!(
                 host = %host,
                 username = %username_from_url.unwrap_or(username),

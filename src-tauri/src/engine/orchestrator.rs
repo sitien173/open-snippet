@@ -203,6 +203,7 @@ impl<R: tauri::Runtime> ResolveNotifySink for AppHandle<R> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_orchestrator<R: Runtime>(
     snippets: Vec<Snippet>,
     settings: StoreSettings,

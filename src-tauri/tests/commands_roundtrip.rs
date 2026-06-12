@@ -1,5 +1,6 @@
 use std::{
     fs,
+    path::Path,
     sync::{Mutex, OnceLock},
 };
 
@@ -7,7 +8,7 @@ use openmacro_lib::{
     commands::snippets::{
         get_store_settings_dto_inner, get_store_settings_inner, list_load_errors_inner,
         list_snippets_inner, load_snippet_store_state, reload_snippets_inner, save_snippet_inner,
-        set_store_settings_inner, SaveSnippetDto, StoreSettingsDto,
+        set_store_settings_inner, SaveSnippetDto,
     },
     store::{StoreSettings, VarDecl, VarKind},
 };
@@ -26,6 +27,17 @@ fn write_yaml(root: &TempDir, relative_path: &str, contents: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, contents).unwrap();
+}
+
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link)
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
 }
 
 #[test]
@@ -118,6 +130,171 @@ snippets:
     .unwrap_err();
 
     assert_eq!(error, "trigger collision: ;sig");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_snippet_rejects_path_outside_snippets_root() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets:
+  - trigger: ;sig
+    replace: hello
+"#,
+    );
+    fs::write(
+        outside.path().join("outside.yaml"),
+        r#"
+version: 1
+snippets: []
+"#,
+    )
+    .unwrap();
+    let state = load_snippet_store_state().unwrap();
+
+    let error = save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: outside.path().join("outside.yaml"),
+            original_trigger: None,
+            original_trigger_literal: None,
+            trigger: ";owned".to_string(),
+            trigger_literal: false,
+            replace: "outside".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.contains("snippets root"), "{error}");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_snippet_rejects_settings_file_target() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "_settings.yaml",
+        r#"
+version: 1
+snippets: []
+"#,
+    );
+    let state = load_snippet_store_state().unwrap();
+
+    let error = save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: root.path().join("_settings.yaml"),
+            original_trigger: None,
+            original_trigger_literal: None,
+            trigger: ";owned".to_string(),
+            trigger_literal: false,
+            replace: "settings".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.contains("_settings.yaml"), "{error}");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_snippet_rejects_non_yaml_target() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "alpha.txt",
+        r#"
+version: 1
+snippets: []
+"#,
+    );
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets: []
+"#,
+    );
+    let state = load_snippet_store_state().unwrap();
+
+    let error = save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: root.path().join("alpha.txt"),
+            original_trigger: None,
+            original_trigger_literal: None,
+            trigger: ";owned".to_string(),
+            trigger_literal: false,
+            replace: "text".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.contains("YAML"), "{error}");
+    std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+}
+
+#[test]
+fn save_snippet_rejects_symlink_target_outside_snippets_root() {
+    let _guard = snippets_test_guard();
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    std::env::set_var("OPENMACRO_SNIPPETS_ROOT", root.path());
+    write_yaml(
+        &root,
+        "alpha.yaml",
+        r#"
+version: 1
+snippets: []
+"#,
+    );
+    fs::write(
+        outside.path().join("outside.yaml"),
+        r#"
+version: 1
+snippets: []
+"#,
+    )
+    .unwrap();
+    let link = root.path().join("linked.yaml");
+    if create_file_symlink(&outside.path().join("outside.yaml"), &link).is_err() {
+        std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
+        return;
+    }
+    let state = load_snippet_store_state().unwrap();
+
+    let error = save_snippet_inner(
+        &state,
+        SaveSnippetDto {
+            source_file: link,
+            original_trigger: None,
+            original_trigger_literal: None,
+            trigger: ";owned".to_string(),
+            trigger_literal: false,
+            replace: "linked".to_string(),
+            vars: Vec::new(),
+        },
+    )
+    .unwrap_err();
+
+    assert!(error.contains("snippets root"), "{error}");
     std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
 }
 
@@ -315,12 +492,12 @@ fn test_get_store_settings_dto_migration() {
     // get_store_settings should return expand_mode_missing: false
     let state = load_snippet_store_state().unwrap();
     let settings = get_store_settings_dto_inner(&state).unwrap();
-    assert_eq!(settings.expand_mode_missing, false);
+    assert!(!settings.expand_mode_missing);
 
     // 2. Upgrade: settings file exists but lacks expand_mode.
     write_yaml(&root, "_settings.yaml", "trigger_prefix: ':'\n");
     let settings = get_store_settings_dto_inner(&state).unwrap();
-    assert_eq!(settings.expand_mode_missing, true);
+    assert!(settings.expand_mode_missing);
 
     // 3. Saved settings: settings file exists and contains expand_mode.
     write_yaml(
@@ -329,7 +506,7 @@ fn test_get_store_settings_dto_migration() {
         "trigger_prefix: ':'\nexpand_mode: manual\n",
     );
     let settings = get_store_settings_dto_inner(&state).unwrap();
-    assert_eq!(settings.expand_mode_missing, false);
+    assert!(!settings.expand_mode_missing);
 
     std::env::remove_var("OPENMACRO_SNIPPETS_ROOT");
 }

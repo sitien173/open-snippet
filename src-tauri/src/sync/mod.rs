@@ -11,8 +11,8 @@ mod creds;
 mod git;
 
 pub use creds::{
-    credential_key, git_remote_callbacks, CredentialStore, Secret, SyncCredential,
-    WindowsCredentialStore,
+    credential_key, git_remote_callbacks, validate_credential_callback_url,
+    validate_https_pat_remote, CredentialStore, Secret, SyncCredential, WindowsCredentialStore,
 };
 pub use git::GitBackend;
 

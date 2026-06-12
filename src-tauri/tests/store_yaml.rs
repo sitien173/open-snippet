@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use openmacro_lib::store::{load_from_root, LoadResult, LoggingConfig, VarKind};
 use tempfile::TempDir;
@@ -9,6 +12,17 @@ fn write_yaml(root: &TempDir, relative_path: &str, contents: &str) {
         fs::create_dir_all(parent).unwrap();
     }
     fs::write(path, contents).unwrap();
+}
+
+fn create_file_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_file(target, link)
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target, link)
+    }
 }
 
 fn load(root: &TempDir) -> LoadResult {
@@ -39,6 +53,36 @@ snippets:
     assert_eq!(
         result.snippets[0].source_file,
         root.path().join("snippets/alpha.yaml")
+    );
+}
+
+#[test]
+fn loader_rejects_yaml_symlink_target_outside_root() {
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(
+        outside.path().join("outside.yaml"),
+        r#"
+version: 1
+snippets:
+  - trigger: ;outside
+    replace: escaped
+"#,
+    )
+    .unwrap();
+    let link = root.path().join("linked.yaml");
+    if create_file_symlink(&outside.path().join("outside.yaml"), &link).is_err() {
+        return;
+    }
+
+    let result = load(&root);
+
+    assert!(result.snippets.is_empty());
+    assert_eq!(result.errors.len(), 1);
+    assert!(
+        result.errors[0].message().contains("snippets root"),
+        "{}",
+        result.errors[0].message()
     );
 }
 

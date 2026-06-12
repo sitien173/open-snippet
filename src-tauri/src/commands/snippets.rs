@@ -241,7 +241,8 @@ pub fn save_snippet_inner(
     state: &SnippetStoreState,
     payload: SaveSnippetDto,
 ) -> Result<(), String> {
-    let mut document = read_yaml_document(&payload.source_file)?;
+    let source_file = validate_snippet_source_file(state.root(), &payload.source_file)?;
+    let mut document = read_yaml_document(&source_file)?;
     let settings = get_store_settings_inner(state)?;
 
     let replacement = SnippetDocument {
@@ -277,7 +278,7 @@ pub fn save_snippet_inner(
             return Err(format!("trigger collision: {snippet_effective_trigger}"));
         }
     }
-    write_yaml_document(&payload.source_file, &document)
+    write_yaml_document(&source_file, &document)
 }
 
 pub fn get_store_settings_inner(state: &SnippetStoreState) -> Result<StoreSettings, String> {
@@ -354,6 +355,75 @@ fn write_store_settings(path: &Path, settings: &StoreSettings) -> Result<(), Str
     temp.persist(path)
         .map_err(|error| error.error.to_string())?;
     Ok(())
+}
+
+fn validate_snippet_source_file(root: &Path, source_file: &Path) -> Result<PathBuf, String> {
+    let file_name = source_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "invalid snippet path: missing file name".to_string())?;
+    if file_name == "_settings.yaml" {
+        return Err("invalid snippet path: _settings.yaml is reserved".to_string());
+    }
+    if !is_yaml_path(source_file) {
+        return Err("invalid snippet path: snippet files must use a YAML extension".to_string());
+    }
+
+    let canonical_root = fs::canonicalize(root)
+        .map_err(|error| format!("failed to canonicalize snippets root: {error}"))?;
+    let candidate = if source_file.is_absolute() {
+        source_file.to_path_buf()
+    } else {
+        root.join(source_file)
+    };
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| format!("invalid snippet path: {}", candidate.display()))?;
+    let canonical_parent = fs::canonicalize(parent)
+        .map_err(|error| format!("failed to canonicalize snippet parent: {error}"))?;
+    if !path_is_within_root(&canonical_parent, &canonical_root) {
+        return Err("invalid snippet path: path escapes snippets root".to_string());
+    }
+
+    if candidate.exists() {
+        let canonical_candidate = fs::canonicalize(&candidate)
+            .map_err(|error| format!("failed to canonicalize snippet path: {error}"))?;
+        if !path_is_within_root(&canonical_candidate, &canonical_root) {
+            return Err("invalid snippet path: path escapes snippets root".to_string());
+        }
+        return Ok(canonical_candidate);
+    }
+
+    Ok(canonical_parent.join(file_name))
+}
+
+fn is_yaml_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("yaml" | "yml")
+    )
+}
+
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let root = normalized_windows_path(root);
+        let path = normalized_windows_path(path);
+        path == root || path.starts_with(&format!("{root}/"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        path == root || path.starts_with(root)
+    }
+}
+
+#[cfg(windows)]
+fn normalized_windows_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
 }
 
 fn relative_path(path: &Path, root: &Path) -> String {

@@ -23,7 +23,7 @@ impl KeyboardSink for MockSink {
     }
 }
 
-struct TestGuard(std::sync::MutexGuard<'static, ()>);
+struct TestGuard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
 
 impl Drop for TestGuard {
     fn drop(&mut self) {

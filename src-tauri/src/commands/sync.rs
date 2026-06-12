@@ -120,6 +120,7 @@ pub fn sync_test_connection_inner(
     auth: AuthMode,
     pat: Option<String>,
 ) -> Result<(), String> {
+    crate::sync::validate_https_pat_remote(&remote, &auth)?;
     maybe_store_pat(state.credential_store.as_ref(), &auth, pat)?;
 
     let temp = TempDir::new().map_err(|error| error.to_string())?;
@@ -144,6 +145,7 @@ pub fn sync_init_inner(
     auth: AuthMode,
     pat: Option<String>,
 ) -> Result<(), String> {
+    crate::sync::validate_https_pat_remote(&remote, &auth)?;
     maybe_store_pat(state.credential_store.as_ref(), &auth, pat)?;
     std::fs::create_dir_all(&state.sync_root).map_err(|error| error.to_string())?;
     state

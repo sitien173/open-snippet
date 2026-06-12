@@ -63,6 +63,10 @@ pub enum LoadError {
         trigger: String,
         name: String,
     },
+    RootEscape {
+        path: PathBuf,
+        message: String,
+    },
 }
 
 impl LoadError {
@@ -77,7 +81,8 @@ impl LoadError {
             | Self::InvalidSettings { path, .. }
             | Self::TooManyCursorTokens { path, .. }
             | Self::ShellCmdNotArray { path, .. }
-            | Self::ShellTimeoutInvalid { path, .. } => path,
+            | Self::ShellTimeoutInvalid { path, .. }
+            | Self::RootEscape { path, .. } => path,
         }
     }
 
@@ -104,6 +109,7 @@ impl LoadError {
                     "shell var `{name}` in snippet `{trigger}` must declare timeout_ms <= 10000"
                 )
             }
+            Self::RootEscape { message, .. } => message.clone(),
         }
     }
 }
@@ -136,12 +142,13 @@ pub fn load_from_root(root: &Path) -> io::Result<LoadResult> {
         }
     };
 
+    let canonical_root = fs::canonicalize(root)?;
     let mut files = Vec::new();
-    collect_yaml_files(root, &mut files)?;
+    let mut errors = Vec::new();
+    collect_yaml_files(root, &canonical_root, &mut files, &mut errors)?;
     files.sort();
 
     let mut snippets = Vec::new();
-    let mut errors = Vec::new();
     let mut trigger_index = HashMap::new();
     let mut duplicate_indexes = HashSet::new();
     let mut duplicate_triggers = HashSet::new();
@@ -186,15 +193,44 @@ pub fn load_from_root(root: &Path) -> io::Result<LoadResult> {
     })
 }
 
-fn collect_yaml_files(root: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+fn collect_yaml_files(
+    root: &Path,
+    canonical_root: &Path,
+    files: &mut Vec<PathBuf>,
+    errors: &mut Vec<LoadError>,
+) -> io::Result<()> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
-        let metadata = entry.metadata()?;
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            errors.push(LoadError::RootEscape {
+                path,
+                message: "invalid snippet path: symlink or junction escapes snippets root"
+                    .to_string(),
+            });
+            continue;
+        }
         if metadata.is_dir() {
-            collect_yaml_files(&path, files)?;
+            let canonical_dir = fs::canonicalize(&path)?;
+            if path_is_within_root(&canonical_dir, canonical_root) {
+                collect_yaml_files(&path, canonical_root, files, errors)?;
+            } else {
+                errors.push(LoadError::RootEscape {
+                    path,
+                    message: "invalid snippet path: path escapes snippets root".to_string(),
+                });
+            }
         } else if is_yaml_file(&path) && !is_settings_file(&path) {
-            files.push(path);
+            let canonical_path = fs::canonicalize(&path)?;
+            if path_is_within_root(&canonical_path, canonical_root) {
+                files.push(path);
+            } else {
+                errors.push(LoadError::RootEscape {
+                    path,
+                    message: "invalid snippet path: path escapes snippets root".to_string(),
+                });
+            }
         }
     }
     Ok(())
@@ -361,4 +397,26 @@ pub(crate) fn effective_trigger(
 
 fn normalize_relative_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn path_is_within_root(path: &Path, root: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let root = normalized_windows_path(root);
+        let path = normalized_windows_path(path);
+        path == root || path.starts_with(&format!("{root}/"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        path == root || path.starts_with(root)
+    }
+}
+
+#[cfg(windows)]
+fn normalized_windows_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
 }

@@ -5,9 +5,13 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use tauri_plugin_autostart::ManagerExt;
 use tempfile::NamedTempFile;
 
 use crate::engine::set_paused;
+
+pub const MIN_EXPANSION_LEN: usize = 1;
+pub const MAX_EXPANSION_LEN: usize = 262_144;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Prefs {
@@ -34,6 +38,33 @@ impl Default for Prefs {
 pub struct PrefsState {
     path: PathBuf,
     prefs: Arc<RwLock<Prefs>>,
+}
+
+pub trait AutostartController {
+    fn set_enabled(&self, enabled: bool) -> Result<(), String>;
+}
+
+struct NoopAutostartController;
+
+impl AutostartController for NoopAutostartController {
+    fn set_enabled(&self, _enabled: bool) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+struct TauriAutostartController<'a> {
+    app: &'a tauri::AppHandle,
+}
+
+impl AutostartController for TauriAutostartController<'_> {
+    fn set_enabled(&self, enabled: bool) -> Result<(), String> {
+        let manager = self.app.autolaunch();
+        if enabled {
+            manager.enable().map_err(|error| error.to_string())
+        } else {
+            manager.disable().map_err(|error| error.to_string())
+        }
+    }
 }
 
 impl PrefsState {
@@ -69,9 +100,14 @@ pub fn get_prefs(state: tauri::State<'_, PrefsState>) -> Prefs {
 
 #[tauri::command]
 #[tracing::instrument(skip(state, prefs), fields(paused = prefs.paused, autostart = prefs.autostart, shell_consent = prefs.shell_consent))]
-pub fn set_prefs(state: tauri::State<'_, PrefsState>, prefs: Prefs) -> Result<(), String> {
+pub fn set_prefs(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, PrefsState>,
+    prefs: Prefs,
+) -> Result<(), String> {
     tracing::info!("saving prefs");
-    set_prefs_inner(state.inner(), prefs)
+    let autostart = TauriAutostartController { app: &app };
+    set_prefs_with_autostart_inner(state.inner(), prefs, &autostart)
 }
 
 pub fn load_prefs_state() -> Result<PrefsState, String> {
@@ -92,6 +128,19 @@ pub fn get_prefs_inner(state: &PrefsState) -> Prefs {
 }
 
 pub fn set_prefs_inner(state: &PrefsState, prefs: Prefs) -> Result<(), String> {
+    set_prefs_with_autostart_inner(state, prefs, &NoopAutostartController)
+}
+
+pub fn set_prefs_with_autostart_inner(
+    state: &PrefsState,
+    prefs: Prefs,
+    autostart: &dyn AutostartController,
+) -> Result<(), String> {
+    validate_prefs(&prefs)?;
+    let previous = get_prefs_inner(state);
+    if previous.autostart != prefs.autostart {
+        autostart.set_enabled(prefs.autostart)?;
+    }
     write_prefs(state.path(), &prefs)?;
     *state.prefs.write().unwrap() = prefs.clone();
     set_paused(prefs.paused);
@@ -111,7 +160,9 @@ pub fn prefs_path() -> Result<PathBuf, String> {
 
 fn read_prefs(path: &PathBuf) -> Result<Prefs, String> {
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&contents).map_err(|error| error.to_string())
+    let prefs: Prefs = serde_json::from_str(&contents).map_err(|error| error.to_string())?;
+    validate_prefs(&prefs)?;
+    Ok(prefs)
 }
 
 fn write_prefs(path: &PathBuf, prefs: &Prefs) -> Result<(), String> {
@@ -126,5 +177,14 @@ fn write_prefs(path: &PathBuf, prefs: &Prefs) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     temp.persist(path)
         .map_err(|error| error.error.to_string())?;
+    Ok(())
+}
+
+fn validate_prefs(prefs: &Prefs) -> Result<(), String> {
+    if !(MIN_EXPANSION_LEN..=MAX_EXPANSION_LEN).contains(&prefs.max_expansion_len) {
+        return Err(format!(
+            "invalid max_expansion_len: must be between {MIN_EXPANSION_LEN} and {MAX_EXPANSION_LEN}"
+        ));
+    }
     Ok(())
 }
